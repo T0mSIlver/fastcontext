@@ -1,0 +1,1 @@
+docker build -t swefc-ubuntu24.04:latest .

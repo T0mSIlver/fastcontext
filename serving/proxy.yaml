@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: proxy-litellm
+  namespace: oss-models
+data:
+  config.yaml: |
+    model_list:
+    - model_name: qwen3-4b-instruct
+      litellm_params:
+        model: openai/qwen3-4b-instruct
+        api_base: http://qwen3-4b-instruct-worker-service.oss-models.svc.cluster.local:30000/v1
+        api_key: 'local-key'
+    - model_name: qwen3-coder-30b-instruct
+      litellm_params:
+        model: openai/qwen3-coder-30b-instruct
+        api_base: http://qwen3-coder-30b-instruct-worker-service.oss-models.svc.cluster.local:30000/v1
+        api_key: 'local-key'
+    - model_name: qwen3p5-4b
+      litellm_params:
+        model: openai/qwen3p5-4b
+        api_base: http://qwen3p5-4b-worker-service.oss-models.svc.cluster.local:30000/v1
+        api_key: 'local-key'
+    - model_name: qwen3p5-9b
+      litellm_params:
+        model: openai/qwen3p5-9b
+        api_base: http://qwen3p5-9b-worker-service.oss-models.svc.cluster.local:30000/v1
+        api_key: 'local-key'
+    - model_name: qwen3p6-35b
+      litellm_params:
+        model: openai/qwen3p6-35b
+        api_base: http://qwen3p6-35b-worker-service.oss-models.svc.cluster.local:30000/v1
+        api_key: 'local-key'
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: proxy-litellm-loadbalancer
+  namespace: oss-models
+spec:
+  type: LoadBalancer
+  # loadBalancerIP: (changed to dynamic IP, try kubectl get svc proxy-litellm-loadbalancer to get the assigned EXTERNAL-IP)
+  ports:
+    - port: 80
+      targetPort: 4000
+      protocol: TCP
+      name: litellm-svc
+  selector:
+    app: proxy-litellm
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proxy-litellm
+  namespace: oss-models
+spec:
+  selector:
+    matchLabels:
+      app: proxy-litellm
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: proxy-litellm
+    spec:
+      nodeSelector:
+        kubernetes.azure.com/agentpool: a100pool # a100pool (AKS-NorwayEast) or a100ib (AKS_SWN_A100)
+        dedicated: sglang
+      tolerations:
+        - key: "sku"
+          operator: "Equal"
+          value: "a100pool" # a100pool (AKS-NorwayEast) or a100ib (AKS_SWN_A100)
+          effect: "NoSchedule"
+      dnsPolicy: ClusterFirst
+      containers:
+        - name: litellm
+          image: mcr.microsoft.com/mirror/docker/library/ubuntu:22.04
+          env: []
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            # full script to run
+            - |
+              apt-get update && apt-get install -y wget curl vim git tmux htop git git-lfs zsh && rm -rf /var/lib/apt/lists/* && apt-get clean
+              export UV_VERSION=0.7.19
+              export UV_CACHE_DIR=/mnt/local/uv_cache
+              mkdir -p $UV_CACHE_DIR
+              curl -LsSf https://astral.sh/uv/$UV_VERSION/install.sh | sh
+              # activate uv
+              source $HOME/.local/bin/env
+
+              mkdir -p /app && cd /app && uv venv --python 3.12 && source .venv/bin/activate
+              # download litellm
+              uv pip install 'litellm[proxy]'
+
+              # start service
+              uv run litellm \
+                --port 4000 \
+                --config /app/config.yaml
+          ports:
+            - containerPort: 4000
+          resources:
+            limits:
+              # Total per node: 96 cores, 1700Gi memory, 8 GPU
+              cpu: "8"
+              memory: 32Gi
+            requests:
+              cpu: "1"
+              memory: 32Gi
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+            - name: local-mnt
+              mountPath: /mnt/local
+      volumes:
+        - name: config-volume
+          configMap:
+            name: proxy-litellm
+        - name: local-mnt
+          hostPath:
+            path: /mnt/local
+            type: DirectoryOrCreate
