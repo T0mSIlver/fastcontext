@@ -1,1 +1,1 @@
-docker build -t swefc-ubuntu24.04:latest .
+docker build -t fastcontext-ubuntu24.04:latest .

@@ -1,6 +1,6 @@
 import os
 
-from swefc.agent.llm import LLM
+from fastcontext.agent.llm import LLM
 
 
 async def test_llm():
@@ -34,7 +34,7 @@ async def test_llm_tools():
             "content": "read file content from ./test_llm.py and ./README.md",
         },
     ]
-    from swefc.agent.tool.read import ReadFileTool
+    from fastcontext.agent.tool.read import ReadFileTool
 
     msg = await llm.acall(
         messages=messages,

@@ -1,9 +1,9 @@
 from uuid import uuid4
 
-from swefc.agent.context import Context
-from swefc.agent.llm import LLM, Message, RequestyAPIError
-from swefc.agent.tool import ToolSet
-from swefc.agent.utils import get_final_answer
+from fastcontext.agent.context import Context
+from fastcontext.agent.llm import LLM, Message, RequestyAPIError
+from fastcontext.agent.tool import ToolSet
+from fastcontext.agent.utils import get_final_answer
 
 
 class Agent:

@@ -2,7 +2,7 @@ import json
 import os
 
 input_file = "./query_swerebench_1k.jsonl"
-workdir = "/workspace/swefc/sft-claude-sonnet-4.6/"
+workdir = "/workspace/fastcontext/sft-claude-sonnet-4.6/"
 save_file = "./query_swerebench_1k_multiturn_traj.jsonl"
 
 with open(input_file, "r") as f:

@@ -28,7 +28,7 @@ class DockerEnvironment:
         self.logger = logger or logging.getLogger("[agent.docker_env]")
         self.container_id = None
         self.image = kwargs.get("image")
-        self.name_prefix = kwargs.get("name_prefix", "swefc")
+        self.name_prefix = kwargs.get("name_prefix", "fastcontext")
         self.instance_id = kwargs.get("instance_id")
         self.cwd = kwargs.get("cwd", "/workspace")
         self.mount_items = kwargs.get("mount_items", [])
@@ -163,7 +163,7 @@ def run_agent_in_docker(uid: str, experiment: str, sample: dict, local_mount_dir
         mount_items=[(local_mount_dir, traj_dir)],
     )
 
-    instance_container.copy_to_container("../../dist/swefc-0.1.0-py3-none-any.whl", agent_workdir)
+    instance_container.copy_to_container("../../dist/fastcontext-0.1.0-py3-none-any.whl", agent_workdir)
     instance_container.copy_to_container("run.sh", agent_workdir)
     instance_container.copy_to_container(query_file, agent_workdir)
     traj_file = os.path.join(traj_dir, experiment, instance_id, "traj.jsonl")
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-threads", type=int, default=1)
     parser.add_argument("--run-head", type=int, default=None)
     parser.add_argument("--prediction-file", type=str, default="./predictions.jsonl")
-    parser.add_argument("--local-mount-dir", type=str, default="/jumbo/workspace/swefc/")
+    parser.add_argument("--local-mount-dir", type=str, default="/jumbo/workspace/fastcontext/")
     parser.add_argument("--iid", type=str, default=None)
     args = parser.parse_args()
     main(

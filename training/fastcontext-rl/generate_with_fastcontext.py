@@ -55,7 +55,7 @@ async def generate(args, sample: Sample, sampling_params, evaluation: bool = Fal
         tool_call_parser=args.sglang_tool_call_parser,
         chat_template_kwargs={"enable_thinking": False},
     )
-    agent_runner = AgentRunner(model="swefc-rl-4b", max_iterations=8, api_client=api_client)
+    agent_runner = AgentRunner(model="fastcontext-rl-4b", max_iterations=8, api_client=api_client)
     try:
         finish_reason, tokens, prompt_ids, loss_mask, final_response, final_answer_result, runtime_info = (
             await agent_runner.run(prompt_msgs, work_dir=workspace)
