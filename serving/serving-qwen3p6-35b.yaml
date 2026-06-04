@@ -64,7 +64,7 @@ spec:
               mkdir -p  /mnt/local/log/qwen3p6-35b/requests
               echo "==== start sglang server ===="
               python3 -m sglang.launch_server \
-                --model-path /mnt/local/models/swefc_sft_qwen3.6_35b_hf_iter_0000137 \
+                --model-path /mnt/local/models/fastcontext_sft_qwen3.6_35b_hf_iter_0000137 \
                 --served-model-name qwen3p6-35b \
                 --reasoning-parser qwen3 \
                 --tool-call-parser qwen3_coder \

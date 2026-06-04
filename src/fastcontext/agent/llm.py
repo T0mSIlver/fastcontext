@@ -88,7 +88,7 @@ class LLM:
         try:
             if "claude" in self.model:
                 # Use the custom API call for claude models
-                from swefc.agent.llm_api import call_completion
+                from fastcontext.agent.llm_api import call_completion
 
                 response = call_completion(model=self.model, messages=messages, tools=tools)
             else:

@@ -14,7 +14,7 @@ with open(system_prompt_file, "r") as f:
     system_prompt = f.read()
 
 input_file = "samples.jsonl"
-output_file = "swefc_rl_training.jsonl"
+output_file = "fastcontext_rl_training.jsonl"
 with open(input_file, "r") as f:
     samples = [json.loads(line) for line in f]
 

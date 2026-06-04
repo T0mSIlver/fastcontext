@@ -1,7 +1,7 @@
 [project]
-name = "swefc"
+name = "fastcontext"
 version = "0.1.0"
-description = "The SWE Fast Context (explore) is a code search agent."
+description = "The FastContext (explore) is a code search agent."
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 
@@ -28,7 +28,18 @@ dev = [
 
 benchmark = [
     "datasets>=4.5.0",
+    "litellm>=1.75.5,!=1.82.7,!=1.82.8",
+    "platformdirs>=4.0.0",
+    "prompt-toolkit>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
+    "requests>=2.0.0",
+    "rich>=13.0.0",
+    "tenacity>=8.0.0",
+    "textual>=0.80.0",
+    "tqdm>=4.67.0",
     "tree-sitter>=0.25.2",
+    "typer>=0.12.0",
 ]
 
 [build-system]
@@ -37,7 +48,7 @@ build-backend = "uv_build"
 
 
 [project.scripts]
-swefc = "swefc.cli:main"
+fastcontext = "fastcontext.cli:main"
 
 [tool.isort]
 profile = "black"

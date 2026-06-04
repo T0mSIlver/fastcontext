@@ -1,18 +1,18 @@
 import os
 
-from swefc.agent.agent import Agent
-from swefc.agent.llm import LLM
-from swefc.agent.tool.tool import ToolSet
+from fastcontext.agent.agent import Agent
+from fastcontext.agent.llm import LLM
+from fastcontext.agent.tool.tool import ToolSet
 
-from swefc.agent.utils import load_system_prompt
+from fastcontext.agent.utils import load_system_prompt
 
 
-def make_swefc_agent(
+def make_fastcontext_agent(
     trajectory_file: str,
     work_dir: str,
     **kwargs,
 ) -> Agent:
-    name = "SWE-FastContext"
+    name = "FastContext"
     system_prompt = kwargs.get("system_prompt", None)
     if system_prompt is None:
         system_prompt = load_system_prompt(work_dir)
@@ -23,9 +23,9 @@ def make_swefc_agent(
         base_url=os.getenv("BASE_URL"),
     )
 
-    from swefc.agent.tool.glob import GlobTool
-    from swefc.agent.tool.grep import GrepTool
-    from swefc.agent.tool.read import ReadTool
+    from fastcontext.agent.tool.glob import GlobTool
+    from fastcontext.agent.tool.grep import GrepTool
+    from fastcontext.agent.tool.read import ReadTool
 
     toolset = ToolSet([ReadTool(), GlobTool(), GrepTool()], work_dir=work_dir)
     return Agent(

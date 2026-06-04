@@ -3,13 +3,13 @@ import asyncio
 import os
 from datetime import datetime
 
-from swefc.agent.agent_factory import make_swefc_agent
+from fastcontext.agent.agent_factory import make_fastcontext_agent
 
 
 def main():
-    """SWEFC Command Line Interface"""
+    """FastContext Command Line Interface"""
     parser = argparse.ArgumentParser(
-        description="SWE Fast Context CLI",
+        description="FastContext CLI",
     )
 
     parser.add_argument("--query", "-q", type=str, help="query to ask the agent")
@@ -18,7 +18,7 @@ def main():
         "-t",
         type=str,
         help="agent trajectory file",
-        default=f".swefc/trajectory_{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.jsonl",
+        default=f".fastcontext/trajectory_{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.jsonl",
     )
     parser.add_argument("--max-turns", type=int, help="maximum number of turns", default=4)
     parser.add_argument("--verbose", action="store_true", help="whether to run in verbose mode")
@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
 
     work_dir = os.getcwd()
-    agent = make_swefc_agent(trajectory_file=args.traj, work_dir=work_dir)
+    agent = make_fastcontext_agent(trajectory_file=args.traj, work_dir=work_dir)
 
     prompt = args.query
     final_output = asyncio.run(

@@ -1,9 +1,9 @@
 import os
 
-from swefc.agent.agent import Agent
-from swefc.agent.llm import LLM
-from swefc.agent.tool import ToolSet
-from swefc.agent.tool.read import ReadTool
+from fastcontext.agent.agent import Agent
+from fastcontext.agent.llm import LLM
+from fastcontext.agent.tool import ToolSet
+from fastcontext.agent.tool.read import ReadTool
 
 
 async def test_agent():
@@ -35,11 +35,11 @@ async def test_agent():
 
 
 async def _run_agent(instance: dict, agent_config: dict) -> dict:
-    from swefc.agent.agent_factory import make_swefc_agent
+    from fastcontext.agent.agent_factory import make_fastcontext_agent
 
     max_turns = int(agent_config.get("max_turns", 4))
-    agent = make_swefc_agent(
-        trajectory_file=agent_config.get("trajectory_file", ".swefc/trajectory.jsonl"),
+    agent = make_fastcontext_agent(
+        trajectory_file=agent_config.get("trajectory_file", ".fastcontext/trajectory.jsonl"),
         work_dir=agent_config.get("work_dir", "/testbed"),
     )
 
