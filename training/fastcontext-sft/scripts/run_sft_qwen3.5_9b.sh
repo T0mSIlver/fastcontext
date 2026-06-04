@@ -24,25 +24,24 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-SLIME_DIR="/root/slime/"
-source "${SLIME_DIR}/scripts/models/qwen3.5-4B.sh"
+source "scripts/models/qwen3.5-9B.sh"
 
 EXP_ROOT="/mnt/local/exp"
-EXP_CKPT=${EXP_ROOT}/ckpt/swefc_sft_3.5_4b_slime/
-EXP_HF_CKPT=${EXP_ROOT}/ckpt/swefc_sft_3.5_4b_hf/
+EXP_CKPT=${EXP_ROOT}/ckpt/fastcontext_sft_9b_slime/
+EXP_HF_CKPT=${EXP_ROOT}/ckpt/fastcontext_sft_9b_hf/
 mkdir -p ${EXP_CKPT}
 mkdir -p ${EXP_HF_CKPT}
 
 CKPT_ARGS=(
-   --hf-checkpoint /mnt/local/models/Qwen3.5-4B/
-   --ref-load /mnt/local/models/Qwen3.5-4B_torch_dist/
+   --hf-checkpoint /mnt/local/models/Qwen3.5-9B/
+   --ref-load /mnt/local/models/Qwen3.5-9B_torch_dist/
    --save ${EXP_CKPT}
    --save-interval 1000
 )
 
 SFT_ARGS=(
    --rollout-function-path slime.rollout.sft_rollout.generate_rollout
-   --prompt-data /mnt/local/datasets/swefc_sft.jsonl
+   --prompt-data /mnt/local/datasets/fastcontext_sft.jsonl
    --input-key messages
    --tool-key tools
    --rollout-shuffle
@@ -59,7 +58,7 @@ SFT_ARGS=(
    --debug-train-only
 )
 
-# 8 GPU shared: TP=4, DP=8/4/2=1
+# 8 GPU shared: TP=2, DP=8/2/4=1, PP=1,
 # max-seq-len: 128K
 PERF_ARGS=(
    --tensor-model-parallel-size 4
@@ -75,7 +74,7 @@ PERF_ARGS=(
 
    # --micro-batch-size 1
    --use-dynamic-batch-size
-   --max-tokens-per-gpu 9216
+   --max-tokens-per-gpu 4096
 )
 
 OPTIMIZER_ARGS=(
@@ -86,7 +85,12 @@ OPTIMIZER_ARGS=(
    --lr-warmup-fraction 0.1
    --weight-decay 0.1
    --adam-beta1 0.9
-   --adam-beta2 0.95
+   --adam-beta2 0.98
+
+   --use-distributed-optimizer
+   --optimizer-cpu-offload
+   --overlap-cpu-optimizer-d2h-h2d
+   --use-precision-aware-optimizer
 )
 
 # --- WANDB CONFIGURATION---
@@ -94,8 +98,8 @@ WANDB_KEY=${WANDB_KEY:-""}
 if [ -n "${WANDB_KEY}" ]; then
    WANDB_ARGS=(
       --use-wandb
-      --wandb-project swefc
-      --wandb-group qwen3.5-4B-sft-v3
+      --wandb-project fastcontext
+      --wandb-group qwen3.5-9B-sft-v3
       --wandb-key ${WANDB_KEY}
    )
 else
@@ -132,7 +136,7 @@ RUNTIME_ENV_JSON="{
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
-   -- python3 "${SLIME_DIR}/train_async.py" \
+   -- python3 train_async.py \
    --actor-num-nodes 1 \
    --actor-num-gpus-per-node 8 \
    ${MODEL_ARGS[@]} \
@@ -157,7 +161,7 @@ ls -all -h ${EXP_CKPT}/$ITER
 PYTHONPATH=/root/Megatron-LM python /root/slime/tools/convert_torch_dist_to_hf.py \
   --input-dir "${EXP_CKPT}/$ITER" \
   --output-dir ${CKPT_SAVE_DIR} \
-  --origin-hf-dir "/mnt/local/models/Qwen3.5-4B" \
+  --origin-hf-dir "/mnt/local/models/Qwen3.5-9B" \
   --force
 
 echo "Converted HF model saved to ${CKPT_SAVE_DIR}"

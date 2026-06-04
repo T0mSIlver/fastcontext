@@ -3,11 +3,11 @@ import json
 from api_sglang import SGLangCompletionClient, mask_assistant_content
 from utils import parse_final_answer, read_citations_content
 
-from swefc.agent.llm import FunctionCall, Message
-from swefc.agent.tool.glob import GlobTool
-from swefc.agent.tool.grep import GrepTool
-from swefc.agent.tool.read import ReadTool
-from swefc.agent.tool.tool import ToolSet
+from fastcontext.agent.llm import FunctionCall, Message
+from fastcontext.agent.tool.glob import GlobTool
+from fastcontext.agent.tool.grep import GrepTool
+from fastcontext.agent.tool.read import ReadTool
+from fastcontext.agent.tool.tool import ToolSet
 
 g_n_sample_debug = 0
 
@@ -29,8 +29,8 @@ class AgentRunner:
         import os
         import tempfile
 
-        os.makedirs("/tmp/swefc_rl", exist_ok=True)
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", prefix="messages_", dir="/tmp/swefc_rl")
+        os.makedirs("/tmp/fastcontext_rl", exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", prefix="messages_", dir="/tmp/fastcontext_rl")
         msgs = [message.to_dict(exclude_none=True) for message in messages]
         with open(tmp.name, "w") as f:
             json.dump(msgs, f, indent=4)
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "/mnt/local/models/swefc_sft_qwen3.5_4b_hf_iter_0000137", trust_remote_code=True
+        "/mnt/local/models/fastcontext_sft_qwen3.5_4b_hf_iter_0000137", trust_remote_code=True
     )
 
     async def main():
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         )
         agent_runner = AgentRunner(model="qwen3p5-4b", max_iterations=8, api_client=api_client)
         finish_reason, tokens, prompt_ids, loss_mask, final_response, final_answer_result, runtime_info = (
-            await agent_runner.run("Searching system_prompt in `/root/swefc`", work_dir="/root/swefc")
+            await agent_runner.run("Searching system_prompt in `/root/fastcontext`", work_dir="/root/fastcontext")
         )
         print("runtime_info:", runtime_info)
         print("Finish reason:", finish_reason)

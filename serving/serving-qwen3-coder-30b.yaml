@@ -64,7 +64,7 @@ spec:
               mkdir -p  /mnt/local/log/qwen3-coder-30b-instruct/requests
               echo "==== start sglang server ===="
               python3 -m sglang.launch_server \
-                --model-path swefc_sft_qwen3-coder-30b_hf_iter_0000137 \
+                --model-path fastcontext_sft_qwen3-coder-30b_hf_iter_0000137 \
                 --served-model-name qwen3-coder-30b-instruct \
                 --tool-call-parser qwen3_coder \
                 --context-length 262144 \

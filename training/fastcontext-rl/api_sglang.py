@@ -190,7 +190,7 @@ class SGLangCompletionClient:
 if __name__ == "__main__":
     """
 python3 -m sglang.launch_server \
-  --model-path /mnt/local/models/swefc_sft_qwen3.5_4b_hf_iter_0000137 \
+  --model-path /mnt/local/models/fastcontext_sft_qwen3.5_4b_hf_iter_0000137 \
   --served-model-name qwen3p5-4b \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
@@ -208,7 +208,7 @@ python3 -m sglang.launch_server \
     from transformers import AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "/mnt/local/models/swefc_sft_qwen3_4b_hf_iter_0000137/", trust_remote_code=True
+        "/mnt/local/models/fastcontext_sft_qwen3_4b_hf_iter_0000137/", trust_remote_code=True
     )
 
     async def main():
