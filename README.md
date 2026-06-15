@@ -9,7 +9,6 @@
 
 <p align="center">
   <a href="#news">📰 News</a> |
-  <a href="#todo">✅ TODO</a> |
   <a href="#overview">🔎 Overview</a> |
   <a href="#results">📊 Results</a> |
   <a href="#quick-start">⚡ Quick Start</a> |
