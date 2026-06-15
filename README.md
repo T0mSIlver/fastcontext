@@ -8,14 +8,6 @@
 </p>
 
 <p align="center">
-  Shaoqiu Zhang*, Maoquan Wang*, Yuling Shi*, Yuhang Wang, Xiaodong Gu, Yongqiang Yao, Rao Fu, Shengyu Fu
-  <br>
-  Microsoft &nbsp;&nbsp;|&nbsp;&nbsp; Shanghai Jiao Tong University
-  <br>
-  * Equal contribution
-</p>
-
-<p align="center">
   <a href="#news">📰 News</a> |
   <a href="#todo">✅ TODO</a> |
   <a href="#overview">🔎 Overview</a> |
@@ -37,12 +29,8 @@ main agent.
 
 ## News
 
-- 🚀 **2026-06-15**: We released the FastContext paper and code.
+- 🚀 **2026-06-15**: We released the arXiv paper [[📄 arXiv](https://arxiv.org/abs/2606.14066)] and the model weights [[🤗 Model](https://huggingface.co/collections/microsoft/swe-fastcontext)].
 
-## TODO
-
-- [ ] 🤗 Release our FC explorer models.
-- [ ] 📦 Release the FastContext training datasets.
 
 ## Overview
 
