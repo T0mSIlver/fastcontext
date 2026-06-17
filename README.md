@@ -315,7 +315,7 @@ If you find FastContext useful, please cite:
 ```bibtex
 @misc{zhang2026fastcontexttrainingefficientrepository,
       title={FastContext: Training Efficient Repository Explorer for Coding Agents},
-      author={Shaoqiu Zhang and Maoquan Wang and Yuling Shi and Yuhang Wang and Xiaodong Gu and Yongqiang Yao and Rao Fu and Shengyu Fu},
+      author={Shaoqiu Zhang and Maoquan Wang and Yuling Shi and Yuhang Wang and Xiaodong Gu and Yongqiang Yao and Tori Gong and Sheng Chen and Rao Fu and Anisha Agarwal and Spandan Garg and Gabriel Ryan and Colin Merkel and Yufan Huang and Shengyu Fu},
       year={2026},
       eprint={2606.14066},
       archivePrefix={arXiv},
