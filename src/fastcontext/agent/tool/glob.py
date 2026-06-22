@@ -44,9 +44,9 @@ class GlobTool(Tool):
 
         p = Path(directory)
         if not p.is_dir():
-            return f"The directory `{directory}` does not exist or is not a directory."
+            return f"<system-reminder>Error: directory `{directory}` does not exist or is not a directory.</system-reminder>"
         if not p.resolve().is_relative_to(Path(cwd).resolve()):
-            return f"Permission error: `{directory}` is not within the working directory `{cwd}`."
+            return f"<system-reminder>Permission error: `{directory}` is not within the working directory `{cwd}`</system-reminder>"
 
         output = run(directory, pattern, cwd=cwd)
 
