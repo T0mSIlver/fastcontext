@@ -21,7 +21,7 @@ class ReadTool(Tool):
             },
             "offset": {
                 "type": "integer",
-                "description": "The line number to start reading from. Positive values are 1-indexed from the start of the file. Negative values count backwards from the end (e.g. -1 is the last line). Only provide if the file is too large to read at once.",
+                "description": "The line number to start reading from. Positive values are 1-indexed from the start of the file. Only provide if the file is too large to read at once.",
             },
             "limit": {
                 "type": "integer",
@@ -34,14 +34,24 @@ class ReadTool(Tool):
     async def call(self, parameters: str, **kwargs) -> str:
         params: dict = json.loads(parameters)
         file_path = params.get("path")
-        offset = params.get("offset")
+        offset = params.get("offset", 1)
         limit = params.get("limit")
 
         if not file_path:
-            return "Read Tool: file path is required."
+            return "<system-reminder>Error: file path is required</system-reminder>"
+
+        cwd = kwargs.get("cwd", Path.cwd().as_posix())
+        if not Path(file_path).resolve().is_relative_to(Path(cwd).resolve()):
+            return f"<system-reminder>Permission error: `{file_path}` is not within the working directory `{cwd}`</system-reminder>"
 
         if not Path(file_path).exists():
-            return f"Read Tool: file {file_path} does not exist."
+            return f"<system-reminder>Error: {file_path} does not exist</system-reminder>"
+
+        if not isinstance(offset, int) or offset <= 0:
+            return "<system-reminder>Error: offset must be a positive integer</system-reminder>"
+
+        if limit is not None and (not isinstance(limit, int) or limit <= 0):
+            return "<system-reminder>Error: limit must be a positive integer</system-reminder>"
 
         async with aiofiles.open(file_path, mode="r") as f:
             raw_lines = await f.readlines()
@@ -50,8 +60,6 @@ class ReadTool(Tool):
             return "File is empty."
 
         end_line = -1
-        if offset is None or offset < 0:
-            offset = 1
         if limit is not None:
             end_line = offset + limit - 1
         if end_line == -1 or end_line > len(raw_lines):

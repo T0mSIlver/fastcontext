@@ -85,7 +85,7 @@ class GrepTool(Tool):
         multiline = params.get("multiline")
 
         if not Path(path).resolve().is_relative_to(Path(cwd).resolve()):
-            return f"Permission error: `{path}` is not within the working directory `{cwd}`."
+            return f"<system-reminder>Permission error: `{path}` is not within the working directory `{cwd}`</system-reminder>"
 
         output = run_rg(
             self._rg_path,
