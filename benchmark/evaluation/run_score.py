@@ -27,7 +27,7 @@ def load_pred_sample_citations(input_file: str) -> dict[str, list[str]]:
     """
 
     pred_sample_citations: dict[str, list[str]] = {}
-    with open(input_file, "r") as f:
+    with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             data = json.loads(line)
             uuid = data["instance_id"]

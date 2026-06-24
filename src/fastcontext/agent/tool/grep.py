@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 from .tool import Tool
@@ -64,12 +65,12 @@ class GrepTool(Tool):
         "required": ["pattern"],
     }
 
-    # Adjust this path if ripgrep is not in your system PATH
-    _rg_path = "/usr/bin/rg"
+    # Use shutil.which to find ripgrep on any platform (Windows, Linux, macOS)
+    _rg_path = shutil.which("rg") or "rg"
 
     async def call(self, parameters: str, **kwargs) -> str:
         params: dict = json.loads(parameters)
-        cwd = kwargs.get("cwd", Path.cwd().as_posix())
+        cwd = kwargs.get("cwd", str(Path.cwd()))
         # ripgrep parameters
         pattern = params.get("pattern")
         path = params.get("path", cwd)
@@ -120,6 +121,12 @@ class GrepTool(Tool):
 def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
     import subprocess
 
+    if not shutil.which(rg_path):
+        return (
+            "Grep tool requires ripgrep (rg) to be installed, but it was not found in PATH.\n"
+            "Install it from: https://github.com/BurntSushi/ripgrep#installation"
+        )
+
     command = [rg_path]
     command.append(pattern)
     if path:
@@ -158,10 +165,16 @@ def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
     command.append("--color")
     command.append("never")
 
-    cwd = Path.cwd().as_posix()
-    output = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    cwd = str(Path.cwd())
+    try:
+        output = subprocess.run(command, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return (
+            "Grep tool requires ripgrep (rg) to be installed, but it was not found.\n"
+            "Install it from: https://github.com/BurntSushi/ripgrep#installation"
+        )
     if output.returncode == 0:
-        output_text = output.stdout if isinstance(output.stdout, str) else output.stdout.decode("utf-8")
+        output_text = output.stdout if isinstance(output.stdout, str) else output.stdout.decode("utf-8", errors="replace")
     else:
-        output_text = output.stderr if isinstance(output.stderr, str) else output.stderr.decode("utf-8")
+        output_text = output.stderr if isinstance(output.stderr, str) else output.stderr.decode("utf-8", errors="replace")
     return output_text

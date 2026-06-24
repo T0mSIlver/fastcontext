@@ -128,7 +128,7 @@ if __name__ == "__main__":
     # check if data_name is a jsonl file
     if data_name.endswith(".jsonl") and os.path.isfile(data_name):
         samples = []
-        with open(data_name, "r") as f:
+        with open(data_name, "r", encoding="utf-8") as f:
             for line in f:
                 samples.append(json.loads(line))
         save_file = f"query_{len(samples)}samples__{model}.jsonl"

@@ -53,7 +53,7 @@ class ReadTool(Tool):
         if limit is not None and (not isinstance(limit, int) or limit <= 0):
             return "<system-reminder>Error: limit must be a positive integer</system-reminder>"
 
-        async with aiofiles.open(file_path, mode="r") as f:
+        async with aiofiles.open(file_path, mode="r", encoding="utf-8", errors="replace") as f:
             raw_lines = await f.readlines()
 
         if len(raw_lines) == 0:
