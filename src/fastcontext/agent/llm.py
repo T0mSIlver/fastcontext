@@ -52,8 +52,8 @@ class LLM:
         self.model = model
         self.base_url = base_url
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self.max_tokens = kwargs.get("max_tokens", 32_000)
-        self.temperature = kwargs.get("temperature", 1.0)
+        self.max_tokens = kwargs.get("max_tokens", 4096)
+        self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
         self.debug = kwargs.get("debug", False)
 

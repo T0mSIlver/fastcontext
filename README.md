@@ -117,6 +117,10 @@ FastContext expects an OpenAI-compatible chat completions endpoint. For direct C
 export BASE_URL="https://your-endpoint.example/v1"
 export MODEL="your-model-name"
 export API_KEY="your-api-key"
+
+# optional: override default FastContext parameters
+export FC_MAX_TOKENS=4096
+export FC_TEMPERATURE=0.7
 ```
 
 Benchmark runners may also pass separate FastContext credentials through `FASTCONTEXT_*` variables in

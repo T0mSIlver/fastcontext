@@ -89,6 +89,7 @@ class GrepTool(Tool):
             RG_PATH,
             pattern,
             path,
+            cwd=cwd,
             glob=glob,
             output_mode=output_mode,
             before_context=before_context,
@@ -156,7 +157,7 @@ def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
     command.append("--color")
     command.append("never")
 
-    cwd = str(Path.cwd())
+    cwd = kwargs.get("cwd", str(Path.cwd()))
 
     output = subprocess.run(command, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 

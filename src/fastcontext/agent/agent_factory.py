@@ -17,10 +17,23 @@ def make_fastcontext_agent(
     if system_prompt is None:
         system_prompt = load_system_prompt(work_dir)
 
+    max_tokens = os.getenv("FC_MAX_TOKENS", "4096").strip()
+    temperature = os.getenv("FC_TEMPERATURE", "0.7").strip()
+    try:
+        max_tokens = int(max_tokens)
+    except ValueError:
+        max_tokens = 4096
+    try:
+        temperature = float(temperature)
+    except ValueError:
+        temperature = 0.7
+
     llm = LLM(
         model=os.getenv("MODEL"),
         api_key=os.getenv("API_KEY"),
         base_url=os.getenv("BASE_URL"),
+        max_tokens=int(max_tokens),
+        temperature=float(temperature),
     )
 
     from fastcontext.agent.tool.glob import GlobTool
