@@ -36,7 +36,10 @@ def _load_system_prompt(path: Path, builtin_args: SystemPromptArgs) -> str:
 def load_system_prompt(work_dir: str) -> str:
 
     os_kind = platform.system()
-    shell_name = os.getenv("SHELL", "bash")
+    if os_kind == "Windows":
+        shell_name = os.getenv("COMSPEC", "powershell.exe")
+    else:
+        shell_name = os.getenv("SHELL", "bash")
     work_dir_ls = "\n".join(os.listdir(work_dir))
 
     return _load_system_prompt(

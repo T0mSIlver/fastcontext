@@ -66,7 +66,7 @@ def default_agent_config_for_bench(bench: str) -> Path:
 def load_env_config(config_path: str) -> dict[str, str]:
     """Load KEY=VALUE config from a .env file."""
     env_vars = {}
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -250,9 +250,9 @@ def process_instance(
         with WRITE_LOCK:
             preds = {}
             if output_path.exists():
-                preds = json.loads(output_path.read_text())
+                preds = json.loads(output_path.read_text(encoding="utf-8"))
             preds[instance_id] = pred_entry
-            output_path.write_text(json.dumps(preds, indent=2))
+            output_path.write_text(json.dumps(preds, indent=2), encoding="utf-8")
 
         # Cleanup
         if env is not None:
@@ -271,7 +271,7 @@ def load_benchmark_data(bench: str) -> list[dict]:
     bench_resolved = DATASET_MAPPING.get(bench, bench)
     if bench_resolved.endswith(".jsonl"):
         assert os.path.exists(bench_resolved), f"Dataset file {bench_resolved} does not exist."
-        with open(bench_resolved) as f:
+        with open(bench_resolved, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
     else:
         return list(datasets.load_dataset(bench_resolved, split="test"))
@@ -329,7 +329,7 @@ def main():
         logger.error(f"mini-swe-agent config not found: {config_path}")
         sys.exit(1)
     logger.info(f"mini-swe-agent config: {config_path}")
-    base_config = yaml.safe_load(config_path.read_text())
+    base_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
     # Load model config from .env file
     env_config = {}
@@ -393,7 +393,7 @@ def main():
     # Resume: skip completed instances
     output_path = Path(args.output)
     if not args.redo_existing and output_path.exists():
-        existing = json.loads(output_path.read_text())
+        existing = json.loads(output_path.read_text(encoding="utf-8"))
         completed_ids = {iid for iid, pred in existing.items() if pred.get("model_patch")}
         before = len(samples)
         samples = [s for s in samples if s["instance_id"] not in completed_ids]
