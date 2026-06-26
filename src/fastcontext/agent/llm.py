@@ -1,3 +1,4 @@
+import os
 from typing import Any, Literal
 
 from openai import AsyncOpenAI
@@ -48,10 +49,10 @@ class Message(BaseModel):
 
 
 class LLM:
-    def __init__(self, model: str, api_key: str, base_url: str, **kwargs) -> None:
+    def __init__(self, model: str, api_key: str | None, base_url: str, **kwargs) -> None:
         self.model = model
         self.base_url = base_url
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self.client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
         self.max_tokens = kwargs.get("max_tokens", 4096)
         self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
@@ -73,6 +74,9 @@ class LLM:
             "temperature": self.temperature,
             "top_p": self.top_p,
         }
+        reasoning_effort = os.getenv("FC_REASONING_EFFORT")
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         if "qwen" in self.model:
             payload["extra_body"] = {
                 "top_k": 20,
@@ -105,6 +109,8 @@ class LLM:
                     reasoning_content = response.choices[0].message.reasoning_content
                 elif hasattr(response.choices[0].message, "reasoning_text"):
                     reasoning_content = response.choices[0].message.reasoning_text
+                elif hasattr(response.choices[0].message, "reasoning"):
+                    reasoning_content = response.choices[0].message.reasoning
                 tool_calls = response.choices[0].message.tool_calls
             elif len(response.choices) == 2:
                 reasoning_content = response.choices[0].message.reasoning_text

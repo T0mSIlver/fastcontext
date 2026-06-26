@@ -114,9 +114,11 @@ dist/fastcontext-0.1.0-py3-none-any.whl
 FastContext expects an OpenAI-compatible chat completions endpoint. For direct CLI usage, configure:
 
 ```bash
-export BASE_URL="https://your-endpoint.example/v1"
-export MODEL="your-model-name"
-export API_KEY="your-api-key"
+export FC_BASE_URL="https://your-endpoint.example/v1"
+export FC_MODEL="your-model-name"
+
+# optional: only needed when your endpoint requires authentication
+export FC_API_KEY="your-api-key"
 
 # optional: override default FastContext parameters
 export FC_MAX_TOKENS=4096
@@ -127,6 +129,33 @@ Benchmark runners may also pass separate FastContext credentials through `FASTCO
 `benchmark/evaluation/configs/example.env`.
 
 ## Quick Start
+
+### Local Ollama endpoint
+
+The easiest local setup on macOS is to run an OpenAI-compatible endpoint with
+[Ollama](https://ollama.com/). Install Ollama, start the service, and pull a quantized FastContext model:
+
+```bash
+brew install ollama
+brew services start ollama
+ollama pull hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF
+```
+
+Configure FastContext to use the local endpoint:
+
+```bash
+export FC_BASE_URL="http://127.0.0.1:11434/v1/"
+export FC_MODEL="hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF:latest"
+
+# Ollama does not require an API key.
+
+# Qwen/FastContext models can emit reasoning separately from final content.
+# Ollama accepts: none, low, medium, high, max.
+export FC_REASONING_EFFORT="none"
+
+export FC_MAX_TOKENS=1024
+export FC_TEMPERATURE=0
+```
 
 Run FastContext from the repository you want to explore:
 
@@ -222,7 +251,7 @@ The standalone runner evaluates FastContext as a repository explorer on SWE-benc
 ```bash
 cd benchmark/swebench
 cp run.sh.sample run.sh
-# Edit run.sh with BASE_URL, MODEL, and API_KEY.
+# Edit run.sh with FC_BASE_URL, FC_MODEL, and FC_API_KEY if your endpoint requires authentication.
 
 uv run --group benchmark python bench_fastcontext.py \
   --bench swebench-multilingual \

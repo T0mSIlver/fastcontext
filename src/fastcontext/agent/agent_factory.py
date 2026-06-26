@@ -7,6 +7,23 @@ from fastcontext.agent.tool.utils import RG_PATH
 from fastcontext.agent.utils import load_system_prompt
 
 
+def _get_env(name: str, legacy_name: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value:
+        return value
+    if legacy_name:
+        return os.getenv(legacy_name)
+    return None
+
+
+def _require_env(name: str, legacy_name: str | None = None) -> str:
+    value = _get_env(name, legacy_name)
+    if value:
+        return value
+    legacy_hint = f" or {legacy_name}" if legacy_name else ""
+    raise RuntimeError(f"Missing required environment variable {name}{legacy_hint}.")
+
+
 def make_fastcontext_agent(
     trajectory_file: str,
     work_dir: str,
@@ -29,9 +46,9 @@ def make_fastcontext_agent(
         temperature = 0.7
 
     llm = LLM(
-        model=os.getenv("MODEL"),
-        api_key=os.getenv("API_KEY"),
-        base_url=os.getenv("BASE_URL"),
+        model=_require_env("FC_MODEL", "MODEL"),
+        api_key=_get_env("FC_API_KEY", "API_KEY"),
+        base_url=_require_env("FC_BASE_URL", "BASE_URL"),
         max_tokens=int(max_tokens),
         temperature=float(temperature),
     )
