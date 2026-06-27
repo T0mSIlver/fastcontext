@@ -135,6 +135,9 @@ class FastContextTUI(App):
     async def on_agent_event(self, message: AgentEvent) -> None:
         ev = message.event
         log = self.log_view
+        # Capture this before new content grows the scroll height: only keep
+        # following the tail if the user hasn't scrolled up to read something.
+        follow = log.scroll_offset.y >= log.max_scroll_y
 
         if isinstance(ev, TurnStarted):
             await log.mount(Static(f"── turn {ev.n} ──", classes="divider"))
@@ -183,7 +186,8 @@ class FastContextTUI(App):
             await log.mount(Static(f"[b red]Error:[/b red] {ev.message}", classes="error"))
             self.sub_title = "error — press q to quit"
 
-        log.scroll_end(animate=False)
+        if follow:
+            log.scroll_end(animate=False)
 
     def action_expand_all(self) -> None:
         for collapsible in self.query(Collapsible):
