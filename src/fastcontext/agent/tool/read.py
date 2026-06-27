@@ -21,7 +21,7 @@ class ReadTool(Tool):
             },
             "offset": {
                 "type": "integer",
-                "description": "The line number to start reading from. Positive values are 1-indexed from the start of the file. Only provide if the file is too large to read at once.",
+                "description": "The line number to start reading from. Positive values are 1-indexed from the start of the file. Negative values count backwards from the end of the file (e.g. -1 starts at the last line). Only provide if the file is too large to read at once.",
             },
             "limit": {
                 "type": "integer",
@@ -47,8 +47,8 @@ class ReadTool(Tool):
         if not Path(file_path).exists():
             return f"<system-reminder>Error: {file_path} does not exist</system-reminder>"
 
-        if not isinstance(offset, int) or offset <= 0:
-            return "<system-reminder>Error: offset must be a positive integer</system-reminder>"
+        if not isinstance(offset, int) or isinstance(offset, bool) or offset == 0:
+            return "<system-reminder>Error: offset must be a non-zero integer</system-reminder>"
 
         if limit is not None and (not isinstance(limit, int) or limit <= 0):
             return "<system-reminder>Error: limit must be a positive integer</system-reminder>"
@@ -58,6 +58,11 @@ class ReadTool(Tool):
 
         if len(raw_lines) == 0:
             return "File is empty."
+
+        # Negative offsets count backwards from the end of the file; clamp to the
+        # start so an over-long negative offset still reads from line 1.
+        if offset < 0:
+            offset = max(1, len(raw_lines) + offset + 1)
 
         end_line = -1
         if limit is not None:
