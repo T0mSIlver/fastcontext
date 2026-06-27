@@ -40,7 +40,11 @@ def load_system_prompt(work_dir: str) -> str:
         shell_name = os.getenv("COMSPEC", "powershell.exe")
     else:
         shell_name = os.getenv("SHELL", "bash")
-    work_dir_ls = "\n".join(os.listdir(work_dir))
+    # List entries with their absolute paths so the model is primed to pass
+    # absolute paths to the tools (Read/Grep/Glob all expect absolute paths),
+    # instead of inventing a short prefix from the workspace name.
+    base = Path(work_dir)
+    work_dir_ls = "\n".join(str(base / name) for name in sorted(os.listdir(work_dir)))
 
     return _load_system_prompt(
         path=Path(__file__).parent / "system.md",
