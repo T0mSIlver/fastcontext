@@ -159,7 +159,13 @@ def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
 
     cwd = kwargs.get("cwd", str(Path.cwd()))
 
-    output = subprocess.run(command, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    timeout = 10  # seconds
+    try:
+        output = subprocess.run(
+            command, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return f"<system-reminder>Grep timed out after {timeout}s</system-reminder>"
 
     if output.returncode == 0:
         output_text = (
