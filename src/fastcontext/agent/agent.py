@@ -7,6 +7,7 @@ from fastcontext.agent.events import (
     ToolCallStarted,
     ToolResultReady,
     TurnStarted,
+    UsageUpdated,
 )
 from fastcontext.agent.llm import LLM, Message, RequestyAPIError
 from fastcontext.agent.tool import ToolSet
@@ -84,6 +85,11 @@ class Agent:
                 return error_msg
             self.n_turn = n_turn
             await self.context.add(step_msg)
+            if event_sink is not None and step_msg.usage:
+                usage = step_msg.usage
+                prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+                completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+                event_sink(UsageUpdated(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens))
             if verbose:
                 print(f"Turn {n_turn}: \n {step_msg.to_dict()} \n")
             if step_msg.tool_calls:
