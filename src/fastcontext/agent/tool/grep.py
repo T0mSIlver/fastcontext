@@ -75,7 +75,7 @@ class GrepTool(Tool):
         output_mode = params.get("output_mode", "content")
         before_context = params.get("-B")
         after_context = params.get("-A")
-        context = params.get("-C", 3)
+        context = params.get("-C")
         line_number = params.get("-n", True)
         ignore_case = params.get("-i", False)
         type = params.get("type")
