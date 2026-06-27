@@ -2,8 +2,17 @@ from uuid import uuid4
 
 from fastcontext.agent.context import Context
 from fastcontext.agent.llm import LLM, Message, RequestyAPIError
+from fastcontext.agent.observed import (
+    correction_message,
+    record_tool_results,
+    unverified_citations,
+)
 from fastcontext.agent.tool import ToolSet
-from fastcontext.agent.utils import get_final_answer
+from fastcontext.agent.utils import get_final_answer, parse_citations
+
+# How many times the agent is asked to fix a final answer that cites line
+# ranges it never opened, before the citations are kept but marked unverified.
+MAX_CITATION_CORRECTIONS = 2
 
 
 class Agent:
@@ -38,6 +47,10 @@ class Agent:
     async def _agent_loop(self, prompt: str, max_turns: int, verbose: bool, citation: bool) -> str:
         # user promp -> tool calls -> tool results -> tool calls ... -> assistant final answer
         n_turn = 0
+        # file realpath -> set of line numbers the model actually observed
+        # (via Read or Grep), used to flag hallucinated citations.
+        observed: dict = {}
+        corrections = 0
         await self.context.add(Message(role="system", content=self.system_prompt))
         await self.context.add(Message(role="user", content=prompt))
 
@@ -70,10 +83,20 @@ class Agent:
             if step_msg.tool_calls:
                 tools_result_msg = await self.toolset.call(step_msg)
                 await self.context.add(tools_result_msg)
-            else:
                 if citation:
-                    return get_final_answer(step_msg.content)
-                return step_msg.content
+                    record_tool_results(observed, step_msg.tool_calls, tools_result_msg, self.work_dir)
+            else:
+                if not citation:
+                    return step_msg.content
+                # Flag citations referencing line ranges the model never opened
+                # and ask it to correct them; after a bounded number of retries
+                # keep the citations but mark them unverified.
+                unverified = unverified_citations(observed, parse_citations(step_msg.content))
+                if unverified and corrections < MAX_CITATION_CORRECTIONS and n_turn <= max_turns:
+                    corrections += 1
+                    await self.context.add(Message(role="user", content=correction_message(unverified)))
+                    continue
+                return get_final_answer(step_msg.content, observed=observed)
 
     async def run(self, prompt: str, max_turns: int = 4, verbose: bool = False, citation: bool = False) -> str:
         if verbose:
