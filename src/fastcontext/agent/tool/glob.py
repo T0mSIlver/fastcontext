@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 from .tool import Tool
-from .utils import RG_PATH
+from .utils import RG_PATH, resolve_path
 
 
 def run(directory: str, pattern: str, cwd: str) -> str:
@@ -46,6 +46,8 @@ class GlobTool(Tool):
         directory = params.get("directory", cwd)
         pattern = params.get("pattern")
 
+        directory, path_note = resolve_path(directory, cwd)
+
         p = Path(directory)
         if not p.is_dir():
             return f"<system-reminder>Error: directory `{directory}` does not exist or is not a directory.</system-reminder>"
@@ -62,6 +64,7 @@ class GlobTool(Tool):
                 f"Results are truncated: showing first {limit} results. Consider using a more specific path or pattern."
             )
 
-        if not matched_files:
-            return "No files found"
-        return "\n".join(matched_files)
+        result = "\n".join(matched_files) if matched_files else "No files found"
+        if path_note:
+            result = f"{path_note}\n{result}"
+        return result

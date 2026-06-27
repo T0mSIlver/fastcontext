@@ -4,6 +4,7 @@ from pathlib import Path
 import aiofiles
 
 from .tool import Tool
+from .utils import resolve_path
 
 MAX_LINE = 2000
 MAX_LINE_LENGTH = 500
@@ -41,6 +42,7 @@ class ReadTool(Tool):
             return "<system-reminder>Error: file path is required</system-reminder>"
 
         cwd = kwargs.get("cwd", Path.cwd().as_posix())
+        file_path, path_note = resolve_path(file_path, cwd)
         if not Path(file_path).resolve().is_relative_to(Path(cwd).resolve()):
             return f"<system-reminder>Permission error: `{file_path}` is not within the working directory `{cwd}`</system-reminder>"
 
@@ -85,4 +87,6 @@ class ReadTool(Tool):
             lines.append("...")
         content = "".join(lines)
         output = f"```{file_path}:{offset}-{end_line}\n{content}\n```"
+        if path_note:
+            output = f"{path_note}\n{output}"
         return output
