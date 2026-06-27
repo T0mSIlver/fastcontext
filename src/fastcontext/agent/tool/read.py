@@ -6,7 +6,7 @@ import aiofiles
 from .tool import Tool
 
 MAX_LINE = 2000
-MAX_LINE_LENGTH = 2000
+MAX_LINE_LENGTH = 500
 
 
 class ReadTool(Tool):
