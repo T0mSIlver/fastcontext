@@ -7,6 +7,8 @@ from pathlib import Path
 from jinja2 import Environment as JinjaEnvironment
 from jinja2 import StrictUndefined
 
+from fastcontext.agent.observed import citation_observed
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SystemPromptArgs:
@@ -56,7 +58,7 @@ def load_system_prompt(work_dir: str) -> str:
 def parse_citations(text: str) -> list:
     final_answer = re.search(r"<final_answer>(.*?)</final_answer>", text, re.DOTALL)
     if final_answer is None:
-        return {"final_answer": text.strip(), "citations": []}
+        return []
 
     entries = final_answer.group(1).strip().splitlines()
 
@@ -87,7 +89,7 @@ def parse_citations(text: str) -> list:
     return citations
 
 
-def format_citations(citations: list, validate: bool = True) -> str:
+def format_citations(citations: list, validate: bool = True, observed: dict | None = None) -> str:
 
     if validate:
         validated_citations = []
@@ -101,16 +103,20 @@ def format_citations(citations: list, validate: bool = True) -> str:
 
     formatted = []
     for c in citations:
+        line = f"{c['path']}:{c['line_range']}"
         if c["explanation"]:
-            formatted.append(f"{c['path']}:{c['line_range']} {c['explanation']}")
-        else:
-            formatted.append(f"{c['path']}:{c['line_range']}")
+            line += f" {c['explanation']}"
+        # Mark citations whose lines were never opened during exploration so a
+        # surviving hallucination is visible rather than silently authoritative.
+        if observed is not None and not citation_observed(observed, c):
+            line += " (unverified: these lines were not opened during exploration)"
+        formatted.append(line)
     return "<final_answer>\n" + "\n".join(formatted) + "\n</final_answer>"
 
 
-def get_final_answer(text: str) -> str:
+def get_final_answer(text: str, observed: dict | None = None) -> str:
     citations = parse_citations(text)
-    final_answer = format_citations(citations)
+    final_answer = format_citations(citations, observed=observed)
     return final_answer
 
 
