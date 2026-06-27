@@ -7,7 +7,7 @@ from .utils import RG_PATH
 
 
 def run(directory: str, pattern: str, cwd: str) -> str:
-    command = [RG_PATH, "--files", directory, "--glob", pattern]
+    command = [RG_PATH, "--files", directory, "--glob", pattern, "--sort", "modified"]
     timeout = 10  # seconds
     try:
         output = subprocess.run(
