@@ -506,6 +506,8 @@ dependencies = [
     { name = "jinja2" },
     { name = "openai" },
     { name = "pydantic" },
+    { name = "rich" },
+    { name = "textual" },
 ]
 
 [package.dev-dependencies]
@@ -542,6 +544,8 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "openai", specifier = ">=2.15.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "textual", specifier = ">=0.80.0" },
 ]
 
 [package.metadata.requires-dev]
