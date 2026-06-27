@@ -149,7 +149,7 @@ def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
             command.append("-n")
     elif output_mode == "files_with_matches":
         command.append("--files-with-matches")
-    elif output_mode == "count_matches":
+    elif output_mode == "count":
         command.append("--count-matches")
 
     # --heading and --color never
