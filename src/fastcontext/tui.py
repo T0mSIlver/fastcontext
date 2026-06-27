@@ -32,6 +32,7 @@ from fastcontext.agent.events import (
     ToolCallStarted,
     ToolResultReady,
     TurnStarted,
+    UsageUpdated,
 )
 
 _KIND_META = {
@@ -82,6 +83,13 @@ class FastContextTUI(App):
     .error {
         color: $error;
     }
+    #tokens {
+        dock: bottom;
+        height: 1;
+        padding: 0 2;
+        background: $panel;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
@@ -100,11 +108,18 @@ class FastContextTUI(App):
         self.error: str | None = None
         self._stream_body: Static | None = None
         self._stream_text: str = ""
+        # Running token totals across the whole run.
+        self._input_tokens: int = 0
+        self._output_tokens: int = 0
+        self._context_tokens: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield VerticalScroll(id="log")
+        # Footer docks first so it sits at the very bottom; the token bar
+        # docks next and stacks just above it.
         yield Footer()
+        yield Static(self._token_bar_text(), id="tokens")
 
     @property
     def log_view(self) -> VerticalScroll:
@@ -170,6 +185,12 @@ class FastContextTUI(App):
             title = f"{icon} result · {ev.name} · {n_lines} line{'' if n_lines == 1 else 's'}"
             await log.mount(Collapsible(Static(ev.output or "(empty)", markup=False), title=title, collapsed=True))
 
+        elif isinstance(ev, UsageUpdated):
+            self._input_tokens += ev.prompt_tokens
+            self._output_tokens += ev.completion_tokens
+            self._context_tokens = ev.prompt_tokens + ev.completion_tokens
+            self.query_one("#tokens", Static).update(self._token_bar_text())
+
         elif isinstance(ev, AgentFinished):
             self.final_answer = ev.answer
             await log.mount(
@@ -188,6 +209,13 @@ class FastContextTUI(App):
 
         if follow:
             log.scroll_end(animate=False)
+
+    def _token_bar_text(self) -> str:
+        return (
+            f"📊 input {self._input_tokens:,} · "
+            f"output {self._output_tokens:,} · "
+            f"context {self._context_tokens:,}"
+        )
 
     def action_expand_all(self) -> None:
         for collapsible in self.query(Collapsible):

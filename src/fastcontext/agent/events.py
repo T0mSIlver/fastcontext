@@ -68,6 +68,14 @@ class ToolResultReady:
 
 
 @dataclass
+class UsageUpdated:
+    """Token usage reported for the latest completed LLM call."""
+
+    prompt_tokens: int
+    completion_tokens: int
+
+
+@dataclass
 class AgentFinished:
     """The agent produced its final answer."""
 
@@ -88,6 +96,7 @@ Event = (
     | StreamClose
     | ToolCallStarted
     | ToolResultReady
+    | UsageUpdated
     | AgentFinished
     | AgentErrored
 )
