@@ -22,6 +22,11 @@ def main():
     )
     parser.add_argument("--max-turns", type=int, help="maximum number of turns", default=4)
     parser.add_argument("--verbose", action="store_true", help="whether to run in verbose mode")
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="stream the run in a collapsible Textual TUI (every reasoning, tool call and result)",
+    )
     parser.add_argument("--citation", action="store_true", help="Only return the citations in the final answer")
 
     args = parser.parse_args()
@@ -30,6 +35,16 @@ def main():
     agent = make_fastcontext_agent(trajectory_file=args.traj, work_dir=work_dir)
 
     prompt = args.query
+
+    if args.tui:
+        from fastcontext.tui import FastContextTUI
+
+        app = FastContextTUI(agent=agent, prompt=prompt, max_turns=args.max_turns, citation=args.citation)
+        app.run()
+        if app.final_answer is not None:
+            print(app.final_answer)
+        return
+
     final_output = asyncio.run(
         agent.run(prompt=prompt, max_turns=args.max_turns, verbose=args.verbose, citation=args.citation)
     )
