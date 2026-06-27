@@ -26,7 +26,7 @@ class GrepTool(Tool):
             "output_mode": {
                 "type": "string",
                 "enum": ["content", "files_with_matches", "count"],
-                "description": 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "files_with_matches".',
+                "description": 'Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "content".',
             },
             "-B": {
                 "type": "number",
@@ -72,7 +72,7 @@ class GrepTool(Tool):
         pattern = params.get("pattern")
         path = params.get("path", cwd)
         glob = params.get("glob")
-        output_mode = params.get("output_mode")
+        output_mode = params.get("output_mode", "content")
         before_context = params.get("-B")
         after_context = params.get("-A")
         context = params.get("-C", 3)
