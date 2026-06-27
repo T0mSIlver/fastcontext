@@ -55,7 +55,7 @@ class GrepTool(Tool):
             "head_limit": {
                 "type": "number",
                 "minimum": 0,
-                "description": 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, shows all results from ripgrep.',
+                "description": 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, results are capped at the first 100 lines.',
             },
             "multiline": {
                 "type": "boolean",
@@ -104,9 +104,8 @@ class GrepTool(Tool):
             return "No matches found"
 
         limit = 100
-        if head_limit is not None:
-            if head_limit < limit and head_limit > 0:
-                limit = head_limit
+        if head_limit is not None and head_limit > 0:
+            limit = head_limit
 
         lines = output.splitlines()
         if len(lines) > limit:

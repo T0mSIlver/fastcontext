@@ -1,9 +1,35 @@
 import asyncio
 import json
+import tempfile
+from pathlib import Path
 
 from fastcontext.agent.tool.glob import GlobTool
 from fastcontext.agent.tool.grep import GrepTool
 from fastcontext.agent.tool.read import ReadTool
+
+
+def test_grep_head_limit():
+    """head_limit must be honored for values above the default 100-line cap,
+    and fall back to 100 when unspecified."""
+    grep = GrepTool()
+    with tempfile.TemporaryDirectory() as cwd:
+        # 250 matching lines, single file, so output exceeds any tested limit.
+        (Path(cwd) / "haystack.txt").write_text("\n".join("MATCH" for _ in range(250)), encoding="utf-8")
+
+        def lines_for(params):
+            out = asyncio.run(grep.call(json.dumps(params), cwd=cwd))
+            return out.splitlines()
+
+        # Above the default cap: previously clamped to 100, must now be honored.
+        # Truncated output = first `limit` lines + one "Results truncated" note.
+        out = lines_for({"pattern": "MATCH", "output_mode": "content", "head_limit": 150})
+        assert len(out) == 151, f"expected 150 lines + note, got {len(out)}"
+        assert "truncated to first 150" in out[-1]
+
+        # Unspecified: 100-line default cap still applies.
+        out = lines_for({"pattern": "MATCH", "output_mode": "content"})
+        assert len(out) == 101, f"expected 100 lines + note, got {len(out)}"
+        assert "truncated to first 100" in out[-1]
 
 
 def test_grep_tool():
