@@ -34,7 +34,7 @@ OS Version: ${OS_KIND}
 
 Shell: ${SHELL_NAME}
 
-Workspace Path:${WORK_DIR}
+Workspace Path: ${WORK_DIR}
 
 The directory listing of the workspace is:
 ```
