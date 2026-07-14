@@ -197,8 +197,8 @@ class _ScriptedLLM:
         self._prompt_tokens = prompt_tokens
         self.calls: list[dict] = []
 
-    async def acall(self, messages, tools, event_sink=None, turn=0):
-        self.calls.append({"tools": tools, "messages": list(messages)})
+    async def acall(self, messages, tools, event_sink=None, turn=0, tool_choice=None):
+        self.calls.append({"tools": tools, "tool_choice": tool_choice, "messages": list(messages)})
         reply = self._replies[min(len(self.calls) - 1, len(self._replies) - 1)]
         reply = reply.model_copy()
         reply.usage = {"prompt_tokens": self._prompt_tokens[min(len(self.calls) - 1, len(self._prompt_tokens) - 1)]}
@@ -239,14 +239,49 @@ async def test_agent_finalizes_instead_of_overflowing():
 
         # It answered rather than exploring until the provider rejected the prompt.
         assert "a.py:1-5" in result
-        # Two turns: the tools were withheld on the second so it could not keep exploring.
         assert len(llm.calls) == 2
         assert llm.calls[0]["tools"], "tools must be offered while there is room"
-        assert llm.calls[1]["tools"] is None, "tools must be withheld once the budget trips"
+        assert llm.calls[0]["tool_choice"] is None, "tool calls must be allowed while there is room"
+        # Once the budget trips, tool calls are FORBIDDEN but the schemas stay in the prompt:
+        # dropping them would change the prompt prefix and invalidate the provider's prompt cache.
+        assert llm.calls[1]["tools"], "tool schemas must remain in the prompt to preserve the cache"
+        assert llm.calls[1]["tool_choice"] == "none", "tool calls must be forbidden once the budget trips"
         # The model was told why.
         assert any(
             "approaching the context limit" in (m.get("content") or "") for m in llm.calls[1]["messages"]
         )
+
+
+async def test_agent_drops_tools_if_the_server_ignores_tool_choice_none():
+    # llama.cpp honors tool_choice="none" only by not *parsing* the call -- the model can still
+    # write a <tool_call> blob into content, which would silently become an empty final answer.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "a.py"
+        src.write_text("\n".join(f"line{i}" for i in range(1, 40)), encoding="utf-8")
+        traj = str(Path(tmp) / "t" / "traj.jsonl")
+
+        unparsed = Message(role="assistant", content='<tool_call>\n{"name": "Read"}\n</tool_call>')
+        answer = Message(role="assistant", content=f"<final_answer>\n{src}:1-5 (why)\n</final_answer>")
+        llm = _ScriptedLLM(
+            replies=[_read_call(str(src)), unparsed, answer],
+            prompt_tokens=[9_500, 9_800, 9_900],
+        )
+        agent = Agent(
+            name="t",
+            system_prompt="sys",
+            llm=llm,
+            toolset=ToolSet([ReadTool()], work_dir=tmp, max_tool_output_chars=30_000),
+            trajectory_file=traj,
+            work_dir=tmp,
+            budget=ContextBudget(max_context=10_000, reserve=1_000),
+        )
+        result = await agent.run(prompt="q", max_turns=10, citation=True)
+
+        assert "a.py:1-5" in result, "the fallback must still produce a real answer"
+        # call 2 forbade tool calls but kept the schemas (cache-preserving); the model misbehaved,
+        # so call 3 drops the schemas outright.
+        assert llm.calls[1]["tool_choice"] == "none" and llm.calls[1]["tools"]
+        assert llm.calls[2]["tools"] is None, "fallback must drop the tool schemas"
 
 
 async def test_agent_explores_freely_when_budget_disabled():
@@ -270,3 +305,6 @@ async def test_agent_explores_freely_when_budget_disabled():
         )
         await agent.run(prompt="q", max_turns=10, citation=True)
         assert all(call["tools"] for call in llm.calls), "budget disabled must never withhold tools"
+        assert all(
+            call["tool_choice"] is None for call in llm.calls
+        ), "budget disabled must never forbid tool calls"

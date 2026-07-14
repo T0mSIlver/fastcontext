@@ -25,6 +25,19 @@ from fastcontext.agent.utils import get_final_answer, parse_citations
 MAX_CITATION_CORRECTIONS = 2
 
 
+def _looks_like_unparsed_tool_call(message: Message) -> bool:
+    """True when the model wrote a tool call as plain text instead of answering.
+
+    tool_choice="none" stops a server from *parsing* tool calls, but does not necessarily stop the
+    model from emitting one. llama.cpp does exactly this: the call arrives as a ``<tool_call>``
+    blob in ``content``, which would silently become an empty final answer.
+    """
+    if message.tool_calls:
+        return False
+    content = message.content or ""
+    return "<tool_call>" in content and "<final_answer>" not in content
+
+
 class Agent:
     """The loaded agent."""
 
@@ -75,9 +88,13 @@ class Agent:
         # line numbers the model actually observed, used to drop hallucinated citations
         observed: ObservedLines = {}
         corrections = 0
-        # Set once the context budget trips: the next turn is the last, and it runs without
-        # tools so the model has no way to keep exploring and must answer.
+        # Set once the context budget trips: the next turn is the last, and tool calls are
+        # forbidden so the model has no way to keep exploring and must answer.
         finalizing = False
+        # Set only if the model ignores tool_choice="none" and writes a tool call as plain text
+        # (some servers do not constrain generation, they just stop parsing tool calls). Then, and
+        # only then, we drop the tool schemas outright -- which costs the prompt cache.
+        drop_tools = False
         await self._remember(Message(role="system", content=self.system_prompt))
         await self._remember(Message(role="user", content=prompt))
 
@@ -95,12 +112,16 @@ class Agent:
 
             tools = self.toolset.schema_list()
             if not finalizing and self.budget.must_finalize(self.context.get_messages(), tools):
-                # Stop while a request still fits. Withholding the tools is what guarantees the
-                # run ends with an answer instead of exploring its way into an unsendable prompt.
+                # Stop while a request still fits, so the run ends with an answer instead of
+                # exploring its way into an unsendable prompt.
                 finalizing = True
                 await self._remember(Message(role="user", content=FINALIZE_MESSAGE))
-            if finalizing:
-                tools = None
+            # Forbid tool calls rather than removing the tools: the schemas stay in the prompt, so
+            # the provider's cached prefix survives the final turn. Dropping them would change the
+            # prompt prefix and invalidate the cache for the whole conversation.
+            tool_choice = "none" if finalizing else None
+            if drop_tools:
+                tools, tool_choice = None, None
 
             if event_sink is not None:
                 event_sink(TurnStarted(n=n_turn))
@@ -112,6 +133,7 @@ class Agent:
                     tools=tools,
                     event_sink=event_sink,
                     turn=n_turn,
+                    tool_choice=tool_choice,
                 )
             except RequestyAPIError as e:
                 error_msg = f"LLM API call failed. So stopping the agent.\nError details:\n{str(e)}"
@@ -129,6 +151,16 @@ class Agent:
                 event_sink(UsageUpdated(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens))
             if verbose:
                 print(f"Turn {n_turn}: \n {step_msg.to_dict()} \n")
+            if finalizing and not drop_tools and _looks_like_unparsed_tool_call(step_msg):
+                # The server honored tool_choice="none" only by not *parsing* the tool call: the
+                # model still wrote one as plain text, which would become an empty final answer.
+                # Retry once with the schemas removed. This costs the prompt cache, so it is a
+                # fallback and not the default path. It does not consume a turn: the wasted turn is
+                # the harness's doing, not the model's, and charging for it could push the run past
+                # max_turns and throw the answer away.
+                drop_tools = True
+                n_turn -= 1
+                continue
             if step_msg.tool_calls and not finalizing:
                 if event_sink is not None:
                     for call in step_msg.tool_calls:

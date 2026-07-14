@@ -66,6 +66,7 @@ class LLM:
         tools: list[dict[str, Any]] | None,
         event_sink: EventSink | None = None,
         turn: int = 0,
+        tool_choice: str | None = None,
     ) -> Message:
 
         if isinstance(messages[0], Message):
@@ -89,6 +90,11 @@ class LLM:
 
         if tools:
             payload["tools"] = tools
+            # Forbidding tool calls with tool_choice keeps the tool schemas in the prompt, so the
+            # cached prefix stays valid. Dropping the tools instead would change the prompt prefix
+            # and invalidate the provider's prompt cache for the whole conversation.
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
 
         if self.debug:
             print("LLM Payload:", payload)
