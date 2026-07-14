@@ -11,6 +11,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from fastcontext.agent.tool.glob import GlobTool
+from fastcontext.agent.tool.grep import GrepTool
 from fastcontext.agent.tool.read import ReadTool
 from fastcontext.agent.tool.utils import resolve_path
 from fastcontext.agent.utils import load_system_prompt
@@ -126,3 +128,28 @@ def test_read_tool_resolves_mangled_path_and_notifies():
         )
         assert "MODEL = 'x'" in out  # file content was actually read
         assert "<system-reminder>" in out  # model was told about the rewrite
+
+
+def test_grep_tool_resolves_mangled_path_and_notifies():
+    grep = GrepTool()
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(tmp)
+        out = asyncio.run(
+            grep.call(
+                json.dumps({"pattern": "MODEL", "path": "/myrepo/src", "output_mode": "content"}),
+                cwd=str(repo),
+            )
+        )
+        assert "MODEL = 'x'" in out  # the search actually ran against the real directory
+        assert "<system-reminder>" in out
+
+
+def test_glob_tool_resolves_mangled_path_and_notifies():
+    glob = GlobTool()
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(tmp)
+        out = asyncio.run(
+            glob.call(json.dumps({"directory": "/myrepo/src", "pattern": "*.py"}), cwd=str(repo))
+        )
+        assert "llm.py" in out  # the glob actually matched inside the real directory
+        assert "<system-reminder>" in out
