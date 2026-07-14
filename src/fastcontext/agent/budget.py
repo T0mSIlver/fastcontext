@@ -29,8 +29,12 @@ _CHARS_PER_TOKEN = 3.0
 _MESSAGE_OVERHEAD_TOKENS = 4
 
 # Held back from the window for the completion itself plus the final-answer turn, so that when
-# the budget trips there is still room for a request to succeed.
+# the budget trips there is still room for a request to succeed. See required_reserve().
 DEFAULT_CONTEXT_RESERVE = 8192
+
+# Headroom on top of the computed reserve, covering the finalize message, the chat template,
+# estimation error, and the per-result truncation notices a many-call turn appends.
+_RESERVE_SLACK_TOKENS = 2048
 
 # ~10k tokens. Generous enough for a real file, small enough that no single result can exhaust a
 # window on its own. Read's own 2000-line x 500-char ceiling allows ~250k tokens without this.
@@ -85,6 +89,46 @@ def cap_tool_output(output: str, limit: int) -> str:
     if limit <= 0 or len(output) <= limit:
         return output
     return output[:limit] + TRUNCATION_NOTICE.format(limit=limit)
+
+
+def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
+    """Bound the *total* tool output a single turn can add.
+
+    A per-result cap alone is not enough: the model can issue several tool calls in one
+    turn, and N results each just under the cap still add N x cap to the prompt. That can
+    overshoot the window in a single step, leaving the final-answer turn itself unsendable
+    -- the exact failure the budget exists to prevent.
+
+    The allowance is spent greedily in call order, so early small results survive intact and
+    only the results that actually exhaust the turn's budget are truncated.
+    """
+    if limit <= 0:
+        return list(outputs)
+    capped: list[str] = []
+    remaining = limit
+    for output in outputs:
+        if len(output) <= remaining:
+            capped.append(output)
+            remaining -= len(output)
+            continue
+        # Truncate to whatever the turn has left -- which may be nothing. Note this cannot
+        # delegate to cap_tool_output(): there a limit of 0 means "no cap", so an exhausted
+        # allowance would let the rest of the turn's output through untouched.
+        capped.append(output[:remaining] + TRUNCATION_NOTICE.format(limit=limit))
+        remaining = 0
+    return capped
+
+
+def required_reserve(max_tool_output_chars: int, max_completion_tokens: int) -> int:
+    """The smallest reserve that keeps the final-answer turn sendable.
+
+    The budget trips only *after* a turn's tool results have landed, so the reserve has to
+    absorb a full turn's worth of tool output plus the completion the model still has to
+    write. Anything less and the agent can cross the limit and discover that even asking for
+    a final answer no longer fits.
+    """
+    turn_tokens = estimate_tokens("x" * max_tool_output_chars) if max_tool_output_chars > 0 else 0
+    return max(DEFAULT_CONTEXT_RESERVE, turn_tokens + max_completion_tokens + _RESERVE_SLACK_TOKENS)
 
 
 class ContextBudget:

@@ -11,10 +11,13 @@ from pathlib import Path
 
 from fastcontext.agent.agent import Agent
 from fastcontext.agent.budget import (
+    DEFAULT_MAX_TOOL_OUTPUT_CHARS,
     ContextBudget,
     cap_tool_output,
+    cap_turn_outputs,
     estimate_messages_tokens,
     estimate_tokens,
+    required_reserve,
 )
 from fastcontext.agent.llm import FunctionCall, Message
 from fastcontext.agent.tool.read import ReadTool
@@ -77,6 +80,57 @@ async def test_toolset_caps_an_oversized_read():
         results = await toolset.call(msg)
         assert len(results[0].content) < 6_000
         assert "Output truncated" in results[0].content
+
+
+def test_cap_turn_outputs_bounds_the_whole_turn_not_just_each_result():
+    # The model can issue several tool calls in one turn. N results each just under a
+    # per-result cap would still add N x cap to the prompt in a single step.
+    # "@" cannot occur in the truncation notice, so counting it measures payload only.
+    outputs = ["@" * 30_000] * 4
+    capped = cap_turn_outputs(outputs, limit=30_000)
+    assert sum(c.count("@") for c in capped) <= 30_000, "a turn must not exceed its total allowance"
+    assert "Output truncated" in capped[1]
+
+
+def test_cap_turn_outputs_spends_the_allowance_greedily():
+    # Early small results survive intact; only what actually exhausts the turn is truncated.
+    capped = cap_turn_outputs(["small", "y" * 50_000], limit=1_000)
+    assert capped[0] == "small"
+    assert "Output truncated" in capped[1]
+
+
+def test_cap_turn_outputs_truncates_fully_once_exhausted():
+    # Regression: cap_tool_output() treats limit=0 as "no cap", so an exhausted allowance
+    # must not be delegated to it -- that would let the rest of the turn through untouched.
+    capped = cap_turn_outputs(["a" * 1_000, "b" * 1_000], limit=1_000)
+    assert capped[0] == "a" * 1_000
+    assert not capped[1].startswith("b" * 100), "second result must not pass through in full"
+    assert "Output truncated" in capped[1]
+
+
+def test_cap_turn_outputs_disabled_with_zero():
+    assert cap_turn_outputs(["a" * 100, "b" * 100], limit=0) == ["a" * 100, "b" * 100]
+
+
+def test_reserve_absorbs_a_full_turn_so_the_finalize_request_still_fits():
+    # The budget trips only AFTER a turn's results land, so the reserve must cover a whole
+    # turn of tool output plus the completion -- otherwise the final-answer request itself
+    # would exceed the window and the run would die anyway.
+    max_context, max_completion = 80_128, 4_096
+    reserve = required_reserve(DEFAULT_MAX_TOOL_OUTPUT_CHARS, max_completion)
+
+    for n_calls in (1, 4, 10):
+        budget = ContextBudget(max_context=max_context, reserve=reserve)
+        budget.record_usage({"prompt_tokens": budget.limit - 1})  # worst case: 1 token under
+        outputs = cap_turn_outputs(["x" * 30_000] * n_calls, DEFAULT_MAX_TOOL_OUTPUT_CHARS)
+        budget.add_pending([{"role": "tool", "content": o} for o in outputs])
+
+        projected = budget.projected_tokens([])
+        assert budget.must_finalize([]), "crossing the limit must trip the budget"
+        assert projected + max_completion <= max_context, (
+            f"{n_calls} calls in one turn left no room for the final answer "
+            f"(projected {projected} + {max_completion} > {max_context})"
+        )
 
 
 # --------------------------------------------------------------------------- budget

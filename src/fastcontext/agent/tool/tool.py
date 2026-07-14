@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from fastcontext.agent.budget import cap_tool_output
+from fastcontext.agent.budget import cap_turn_outputs
 from fastcontext.agent.llm import Message
 
 MAX_TOOLRUN_TIMEOUT = 10
@@ -104,12 +104,15 @@ class ToolSet:
                 )
             tool_results.append(result)
 
+        # Bound what this whole turn adds, not just each result: N results each just under a
+        # per-result cap still add N x cap to the prompt in one step.
+        outputs = cap_turn_outputs([tr.output for tr in tool_results], self.max_tool_output_chars)
         tools_result_messages = []
-        for tr in tool_results:
+        for tr, output in zip(tool_results, outputs):
             tools_result_messages.append(
                 Message(
                     role="tool",
-                    content=cap_tool_output(tr.output, self.max_tool_output_chars),
+                    content=output,
                     tool_call_id=tr.tool_call_id,
                 )
             )

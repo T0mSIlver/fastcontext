@@ -2,9 +2,9 @@ import os
 
 from fastcontext.agent.agent import Agent
 from fastcontext.agent.budget import (
-    DEFAULT_CONTEXT_RESERVE,
     DEFAULT_MAX_TOOL_OUTPUT_CHARS,
     ContextBudget,
+    required_reserve,
 )
 from fastcontext.agent.llm import LLM
 from fastcontext.agent.tool.tool import ToolSet
@@ -52,7 +52,6 @@ def make_fastcontext_agent(
     max_context = kwargs.get("max_context")
     if max_context is None:
         max_context = _int_env("FC_MAX_CONTEXT", 0)
-    reserve = _int_env("FC_CONTEXT_RESERVE", DEFAULT_CONTEXT_RESERVE)
     max_tool_output_chars = kwargs.get("max_tool_output_chars")
     if max_tool_output_chars is None:
         max_tool_output_chars = _int_env("FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS)
@@ -75,6 +74,11 @@ def make_fastcontext_agent(
         max_tokens=int(max_tokens),
         temperature=float(temperature),
     )
+
+    # The budget trips only after a turn's tool results have landed, so the reserve must absorb a
+    # full turn of tool output plus the completion -- otherwise the agent can cross the limit and
+    # find that even the final-answer request no longer fits.
+    reserve = _int_env("FC_CONTEXT_RESERVE", 0) or required_reserve(max_tool_output_chars, int(max_tokens))
 
     from fastcontext.agent.tool.glob import GlobTool
     from fastcontext.agent.tool.grep import GrepTool
