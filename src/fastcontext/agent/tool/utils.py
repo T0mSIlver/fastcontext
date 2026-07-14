@@ -57,13 +57,23 @@ def resolve_path(file_path: str, cwd: str) -> tuple[str, str | None]:
     for i in range(1, len(parts)):
         candidate = (cwd_path / Path(*parts[i:])).resolve()
         if candidate.is_relative_to(cwd_path) and candidate.exists():
-            note = (
-                f"<system-reminder>Note: '{file_path}' is not inside the workspace; "
-                f"interpreted it as the closest match '{candidate}'. Use absolute paths "
-                f"under '{cwd_path}' exactly as shown in the workspace directory listing "
-                f"and tool output to avoid ambiguity.</system-reminder>"
-            )
-            return str(candidate), note
+            return str(candidate), _rewrite_note(file_path, candidate, cwd_path)
 
-    # 4. No match: return unchanged so the caller emits its normal error.
+    # 4. A single-component absolute path ("/myrepo") is the model using the repo
+    #    name as the filesystem root: it denotes the workspace itself. Deeper paths
+    #    are NOT collapsed to the workspace — an unmatched suffix must stay an error
+    #    rather than silently widening a Read/Grep to the whole repository.
+    if len(parts) == 2:
+        return str(cwd_path), _rewrite_note(file_path, cwd_path, cwd_path)
+
+    # 5. No match: return unchanged so the caller emits its normal error.
     return file_path, None
+
+
+def _rewrite_note(original: str, resolved: Path, cwd_path: Path) -> str:
+    return (
+        f"<system-reminder>Note: '{original}' is not inside the workspace; "
+        f"interpreted it as the closest match '{resolved}'. Use absolute paths "
+        f"under '{cwd_path}' exactly as shown in the workspace directory listing "
+        f"and tool output to avoid ambiguity.</system-reminder>"
+    )

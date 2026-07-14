@@ -81,6 +81,23 @@ def test_longest_suffix_wins():
         assert resolved == str((repo / "src" / "pkg" / "llm.py").resolve())
 
 
+def test_bare_repo_name_root_resolves_to_workspace_root():
+    # Observed repeatedly in eval trajectories: the model uses the repo name as
+    # the filesystem root and passes "/myrepo" meaning the workspace itself.
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(tmp)
+        resolved, note = resolve_path("/myrepo", str(repo))
+        assert Path(resolved).resolve() == repo.resolve()
+        assert note is not None
+
+
+def test_bare_arbitrary_root_resolves_to_workspace_root():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(tmp)
+        resolved, _ = resolve_path("/whatever", str(repo))
+        assert Path(resolved).resolve() == repo.resolve()
+
+
 def test_unresolvable_absolute_returns_unchanged_no_note():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
