@@ -10,8 +10,18 @@ from fastcontext.agent.events import (
     UsageUpdated,
 )
 from fastcontext.agent.llm import LLM, Message, RequestyAPIError
+from fastcontext.agent.observed import (
+    ObservedLines,
+    correction_message,
+    record_tool_results,
+    unverified_citations,
+)
 from fastcontext.agent.tool import ToolSet
-from fastcontext.agent.utils import get_final_answer
+from fastcontext.agent.utils import get_final_answer, parse_citations
+
+# How many times the agent is asked to fix a final answer that cites line ranges it never opened,
+# before the remaining unverified citations are dropped from the answer.
+MAX_CITATION_CORRECTIONS = 2
 
 
 class Agent:
@@ -53,6 +63,9 @@ class Agent:
     ) -> str:
         # user promp -> tool calls -> tool results -> tool calls ... -> assistant final answer
         n_turn = 0
+        # line numbers the model actually observed, used to drop hallucinated citations
+        observed: ObservedLines = {}
+        corrections = 0
         await self.context.add(Message(role="system", content=self.system_prompt))
         await self.context.add(Message(role="user", content=prompt))
 
@@ -98,6 +111,8 @@ class Agent:
                         event_sink(ToolCallStarted(id=call.id, name=call.name, arguments=call.arguments))
                 tools_result_msg = await self.toolset.call(step_msg)
                 await self.context.add(tools_result_msg)
+                if citation:
+                    record_tool_results(observed, step_msg.tool_calls, tools_result_msg, self.work_dir)
                 if event_sink is not None:
                     name_by_id = {call.id: call.name for call in step_msg.tool_calls}
                     for result in tools_result_msg:
@@ -110,7 +125,18 @@ class Agent:
                             )
                         )
             else:
-                answer = get_final_answer(step_msg.content) if citation else step_msg.content
+                if not citation:
+                    if event_sink is not None:
+                        event_sink(AgentFinished(answer=step_msg.content or ""))
+                    return step_msg.content
+                # Ask the model to fix citations referencing line ranges it never opened; once the
+                # retries are exhausted, the still-unverified ones are dropped by get_final_answer.
+                unverified = unverified_citations(observed, parse_citations(step_msg.content or ""), self.work_dir)
+                if unverified and corrections < MAX_CITATION_CORRECTIONS and n_turn <= max_turns:
+                    corrections += 1
+                    await self.context.add(Message(role="user", content=correction_message(unverified)))
+                    continue
+                answer = get_final_answer(step_msg.content or "", observed=observed, cwd=self.work_dir)
                 if event_sink is not None:
                     event_sink(AgentFinished(answer=answer or ""))
                 return answer
