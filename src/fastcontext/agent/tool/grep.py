@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from .tool import Tool
-from .utils import RG_PATH
+from .utils import RG_PATH, resolve_path
 
 
 class GrepTool(Tool):
@@ -82,6 +82,7 @@ class GrepTool(Tool):
         head_limit = params.get("head_limit")
         multiline = params.get("multiline")
 
+        path, path_note = resolve_path(path, cwd)
         if not Path(path).resolve().is_relative_to(Path(cwd).resolve()):
             return f"<system-reminder>Permission error: `{path}` is not within the working directory `{cwd}`</system-reminder>"
 
@@ -101,17 +102,20 @@ class GrepTool(Tool):
             multiline=multiline,
         )
         if not output:
-            return "No matches found"
+            output = "No matches found"
+        else:
+            limit = 100
+            if head_limit is not None and head_limit > 0:
+                limit = head_limit
 
-        limit = 100
-        if head_limit is not None and head_limit > 0:
-            limit = head_limit
+            lines = output.splitlines()
+            if len(lines) > limit:
+                output = "\n".join(lines[:limit])
+                truncated_hit = f"Results truncated to first {limit} lines"
+                output += f"\n{truncated_hit}"
 
-        lines = output.splitlines()
-        if len(lines) > limit:
-            output = "\n".join(lines[:limit])
-            truncated_hit = f"Results truncated to first {limit} lines"
-            output += f"\n{truncated_hit}"
+        if path_note:
+            output = f"{path_note}\n{output}"
         return output
 
 
