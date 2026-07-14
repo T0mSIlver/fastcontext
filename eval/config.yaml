@@ -1,0 +1,47 @@
+# FastContext eval configuration.
+#
+# Edit `tasks` with the repos + queries you want to evaluate, and `branches`
+# with the FastContext branches to compare. Each branch is run from its own git
+# worktree of `fastcontext_repo`, so the same query is scored against each
+# version of the explorer.
+
+# The FastContext source repo whose branches we compare.
+fastcontext_repo: /home/dev/work/fastcontext
+
+# Branches of FastContext to compare (one column per branch in the dashboard).
+branches:
+  - fastcontext-expl-eval-1
+  - fastcontext-expl-eval-2
+
+# Per-run settings.
+max_turns: 6
+citation: true   # run with --citation so the final-answer block (and the
+                 # self-correction loop) is exercised.
+retries: 2         # extra attempts for a run that fails (e.g. a flaky LLM endpoint)
+retry_backoff: 5   # seconds between attempts
+
+# The eval set: a repo to explore + the query to run in it.
+# >>> Replace these with the repo list and prompts you want to evaluate. <<<
+tasks:
+  - name: llama-anthropic-thinking
+    repo: /home/dev/work/llama.cpp
+    query: >-
+      Where is the Anthropic-compatible API server implemented, and how are
+      thinking blocks preserved for reasoning models in streaming responses?
+  - name: codspeed-auth
+    repo: /home/dev/work/codspeed
+    query: >-
+      Locate the authentication and login logic and where API tokens are read
+      and stored.
+
+# Optional pre-recorded trajectories shown as reference rows (no run needed).
+# Handy for eyeballing the analyzer without an LLM endpoint configured.
+reference_runs:
+  - branch: example
+    name: ref-llama-tui2
+    repo: /home/dev/work/llama.cpp
+    trajectory: /home/dev/work/llama.cpp/.fastcontext/trajectory-tui2.jsonl
+  - branch: example
+    name: ref-codspeed-verbose
+    repo: /home/dev/work/codspeed
+    trajectory: /home/dev/work/codspeed/.fastcontext/trajectory_verbose.jsonl
