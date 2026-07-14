@@ -33,6 +33,36 @@ def test_estimate_tokens_scales_with_length():
     assert estimate_tokens("x" * 300) > estimate_tokens("x" * 30)
 
 
+def test_estimate_does_not_undercount_non_ascii():
+    # An ASCII-calibrated chars/token ratio under-counts CJK and other dense text by several
+    # times. That is the one direction the estimate must never err in: under-counting walks the
+    # agent straight into the context overflow this module exists to prevent. Real tokenizers put
+    # CJK at roughly one token per character.
+    cjk = "内容" * 15_000  # 30k characters
+    assert estimate_tokens(cjk) >= 30_000, "CJK must not be estimated at the ASCII ratio"
+    # ASCII source is still estimated at the (conservative) ASCII ratio, not inflated.
+    assert estimate_tokens("x" * 30_000) < 15_000
+
+
+def test_reserve_survives_a_full_turn_of_non_ascii_output():
+    # The reserve is sized in CHARACTERS of tool output, so it must assume worst-case token
+    # density -- otherwise a single CJK-heavy turn overshoots the window after the budget trips.
+    max_context, max_completion = 80_128, 4_096
+    reserve = required_reserve(DEFAULT_MAX_TOOL_OUTPUT_CHARS, max_completion)
+
+    budget = ContextBudget(max_context=max_context, reserve=reserve)
+    budget.record_usage({"prompt_tokens": budget.limit - 1}, 0)  # worst case: 1 token under
+    worst = cap_turn_outputs(["内" * 50_000], DEFAULT_MAX_TOOL_OUTPUT_CHARS)
+    tail = [{"role": "tool", "content": o} for o in worst]
+
+    projected = budget.projected_tokens(tail)
+    assert budget.must_finalize(tail)
+    assert projected + max_completion <= max_context, (
+        f"a CJK turn left no room for the final answer (projected {projected} + "
+        f"{max_completion} > {max_context})"
+    )
+
+
 def test_estimate_counts_tool_call_arguments():
     # Tool-call arguments are part of the prompt on the next turn and must be counted.
     bare = [{"role": "assistant", "content": ""}]
@@ -102,10 +132,20 @@ def test_cap_turn_outputs_spends_the_allowance_greedily():
 def test_cap_turn_outputs_truncates_fully_once_exhausted():
     # Regression: cap_tool_output() treats limit=0 as "no cap", so an exhausted allowance
     # must not be delegated to it -- that would let the rest of the turn through untouched.
-    capped = cap_turn_outputs(["a" * 1_000, "b" * 1_000], limit=1_000)
-    assert capped[0] == "a" * 1_000
-    assert not capped[1].startswith("b" * 100), "second result must not pass through in full"
+    capped = cap_turn_outputs(["a" * 4_000, "b" * 4_000], limit=5_000)
+    assert capped[0].count("a") > 0, "the first result should get most of the allowance"
+    assert capped[1].count("b") < 4_000, "second result must not pass through in full"
     assert "Output truncated" in capped[1]
+
+
+def test_cap_turn_outputs_total_stays_under_limit_for_many_calls():
+    # The truncation notices are not free. With one notice per call, a turn with many truncated
+    # calls would drift past the ceiling the reserve was sized against, so the notices must be
+    # charged against the allowance too.
+    for n_calls in (1, 4, 10, 30):
+        capped = cap_turn_outputs(["@" * 50_000] * n_calls, limit=16_000)
+        total = sum(len(c) for c in capped)
+        assert total <= 16_000, f"{n_calls} calls produced {total} chars, over the 16,000 allowance"
 
 
 def test_cap_turn_outputs_disabled_with_zero():
@@ -121,12 +161,12 @@ def test_reserve_absorbs_a_full_turn_so_the_finalize_request_still_fits():
 
     for n_calls in (1, 4, 10):
         budget = ContextBudget(max_context=max_context, reserve=reserve)
-        budget.record_usage({"prompt_tokens": budget.limit - 1})  # worst case: 1 token under
+        budget.record_usage({"prompt_tokens": budget.limit - 1}, 0)  # worst case: 1 token under
         outputs = cap_turn_outputs(["x" * 30_000] * n_calls, DEFAULT_MAX_TOOL_OUTPUT_CHARS)
-        budget.add_pending([{"role": "tool", "content": o} for o in outputs])
+        tail = [{"role": "tool", "content": o} for o in outputs]
 
-        projected = budget.projected_tokens([])
-        assert budget.must_finalize([]), "crossing the limit must trip the budget"
+        projected = budget.projected_tokens(tail)
+        assert budget.must_finalize(tail), "crossing the limit must trip the budget"
         assert projected + max_completion <= max_context, (
             f"{n_calls} calls in one turn left no room for the final answer "
             f"(projected {projected} + {max_completion} > {max_context})"
@@ -154,21 +194,21 @@ def test_budget_trips_when_projection_crosses_limit():
 def test_measured_usage_replaces_the_estimate():
     # The provider's exact prompt_tokens must win, so estimation error cannot accumulate.
     budget = ContextBudget(max_context=10_000, reserve=2_000)
-    budget.record_usage({"prompt_tokens": 7_900})
+    budget.record_usage({"prompt_tokens": 7_900}, 0)
     assert not budget.must_finalize([])
-    budget.add_pending([{"role": "tool", "content": "x" * 900}])  # ~300 more tokens
-    assert budget.must_finalize([])
+    # the tail after the measured prefix is estimated from the conversation itself
+    assert budget.must_finalize([{"role": "tool", "content": "x" * 900}])  # ~300 more tokens
 
 
 def test_record_usage_clears_pending():
     budget = ContextBudget(max_context=100_000)
-    budget.record_usage({"prompt_tokens": 500})
-    budget.add_pending([{"role": "tool", "content": "x" * 3_000}])
-    # exact prefix (500) + estimate for what was appended since (~1000)
-    assert budget.projected_tokens([]) > 1_000
+    budget.record_usage({"prompt_tokens": 500}, 0)
+    tail = [{"role": "tool", "content": "x" * 3_000}]
+    # exact prefix (500) + estimate for the tail appended since (~1000)
+    assert budget.projected_tokens(tail) > 1_000
     # A fresh measurement supersedes the estimate entirely rather than stacking on it.
-    budget.record_usage({"prompt_tokens": 1_600})
-    assert budget.projected_tokens([]) == 1_600
+    budget.record_usage({"prompt_tokens": 1_600}, len(tail))
+    assert budget.projected_tokens(tail) == 1_600
 
 
 def test_estimate_used_before_the_first_response():
@@ -179,8 +219,8 @@ def test_estimate_used_before_the_first_response():
 
 def test_record_usage_ignores_missing_usage():
     budget = ContextBudget(max_context=100_000)
-    budget.record_usage(None)
-    budget.record_usage({})
+    budget.record_usage(None, 0)
+    budget.record_usage({}, 0)
     assert budget.projected_tokens([{"role": "user", "content": "hi"}]) > 0
 
 

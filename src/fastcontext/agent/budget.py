@@ -21,9 +21,15 @@ under-counting hits the very failure this module exists to prevent.
 
 import json
 
-# Chars per token. Real tokenizers land around 3.5-4 chars/token on source code; 3.0
-# over-counts on purpose so the estimate errs toward finalizing early.
-_CHARS_PER_TOKEN = 3.0
+# Chars per token for ASCII text. Real tokenizers land around 3.5-4 chars/token on source code;
+# 3.0 over-counts on purpose so the estimate errs toward finalizing early.
+_ASCII_CHARS_PER_TOKEN = 3.0
+
+# Non-ASCII text tokenizes far denser -- CJK is roughly one token per character, and can be worse.
+# Charging 1 token per non-ASCII character keeps the estimate conservative on i18n resources, CJK
+# source and base64 blobs, where an ASCII-calibrated ratio would UNDER-count by tens of thousands
+# of tokens on a single turn and let the agent walk straight into the overflow it exists to avoid.
+_NON_ASCII_TOKENS_PER_CHAR = 1.0
 
 # Per-message overhead (role, delimiters, tool-call scaffolding) the chat template adds.
 _MESSAGE_OVERHEAD_TOKENS = 4
@@ -36,9 +42,11 @@ DEFAULT_CONTEXT_RESERVE = 8192
 # estimation error, and the per-result truncation notices a many-call turn appends.
 _RESERVE_SLACK_TOKENS = 2048
 
-# ~10k tokens. Generous enough for a real file, small enough that no single result can exhaust a
-# window on its own. Read's own 2000-line x 500-char ceiling allows ~250k tokens without this.
-DEFAULT_MAX_TOOL_OUTPUT_CHARS = 30_000
+# Total tool output ONE turn may add, in characters (not per result -- see cap_turn_outputs).
+# ~4k tokens of ASCII source, and the reserve is sized against it at worst-case density, so the
+# value is a direct trade: raising it buys the model more per turn and costs usable context.
+# Read's own 2000-line x 500-char ceiling would otherwise allow ~250k tokens from a single call.
+DEFAULT_MAX_TOOL_OUTPUT_CHARS = 16_000
 
 TRUNCATION_NOTICE = (
     "\n<system-reminder>Output truncated: it exceeded the per-result limit of {limit} characters. "
@@ -54,9 +62,16 @@ FINALIZE_MESSAGE = (
 
 
 def estimate_tokens(text: str | None) -> int:
+    """Conservatively estimate the tokens ``text`` costs.
+
+    Deliberately over-counts. Over-counting finalizes the run slightly early; under-counting
+    walks into the context overflow this module exists to prevent.
+    """
     if not text:
         return 0
-    return int(len(text) / _CHARS_PER_TOKEN) + 1
+    non_ascii = sum(1 for ch in text if ord(ch) > 127)
+    ascii_chars = len(text) - non_ascii
+    return int(ascii_chars / _ASCII_CHARS_PER_TOKEN + non_ascii * _NON_ASCII_TOKENS_PER_CHAR) + 1
 
 
 def estimate_message_tokens(message: dict) -> int:
@@ -104,8 +119,16 @@ def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
     """
     if limit <= 0:
         return list(outputs)
+
+    notice = TRUNCATION_NOTICE.format(limit=limit)
+    # Every result may need a truncation notice, and the notices are not free. Set the payload
+    # allowance aside for them up front so the turn's total stays under `limit` for ANY number of
+    # tool calls -- otherwise a turn with many truncated calls appends one notice each and drifts
+    # past the ceiling the reserve was sized against.
+    payload_allowance = max(0, limit - len(notice) * len(outputs))
+
     capped: list[str] = []
-    remaining = limit
+    remaining = payload_allowance
     for output in outputs:
         if len(output) <= remaining:
             capped.append(output)
@@ -114,21 +137,33 @@ def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
         # Truncate to whatever the turn has left -- which may be nothing. Note this cannot
         # delegate to cap_tool_output(): there a limit of 0 means "no cap", so an exhausted
         # allowance would let the rest of the turn's output through untouched.
-        capped.append(output[:remaining] + TRUNCATION_NOTICE.format(limit=limit))
+        capped.append(output[:remaining] + notice)
         remaining = 0
     return capped
 
 
-def required_reserve(max_tool_output_chars: int, max_completion_tokens: int) -> int:
+def required_reserve(max_turn_output_chars: int, max_completion_tokens: int) -> int:
     """The smallest reserve that keeps the final-answer turn sendable.
 
-    The budget trips only *after* a turn's tool results have landed, so the reserve has to
-    absorb a full turn's worth of tool output plus the completion the model still has to
-    write. Anything less and the agent can cross the limit and discover that even asking for
-    a final answer no longer fits.
+    The budget can only trip *after* a turn's tool results have landed, so the reserve has to
+    absorb everything one turn can add on top of a prompt that was still under the limit:
+
+      - the turn's tool output, at worst-case token density (see below),
+      - the assistant message that requested the tools, bounded by the completion limit,
+      - the completion the model still has to write for the final answer.
+
+    Tool output is charged at **one token per character**, not the ASCII ratio. A turn is capped
+    in *characters*, and CJK / i18n resources tokenize at roughly one token per character, so an
+    ASCII-calibrated reserve would be several times too small on exactly the content that already
+    strains the window.
     """
-    turn_tokens = estimate_tokens("x" * max_tool_output_chars) if max_tool_output_chars > 0 else 0
-    return max(DEFAULT_CONTEXT_RESERVE, turn_tokens + max_completion_tokens + _RESERVE_SLACK_TOKENS)
+    if max_turn_output_chars <= 0:
+        # No cap on tool output means no bound on what one turn can add; the reserve cannot make
+        # any promise, so fall back to the flat default.
+        return DEFAULT_CONTEXT_RESERVE
+    worst_case_turn_tokens = max_turn_output_chars
+    needed = worst_case_turn_tokens + 2 * max_completion_tokens + _RESERVE_SLACK_TOKENS
+    return max(DEFAULT_CONTEXT_RESERVE, needed)
 
 
 class ContextBudget:
@@ -145,8 +180,11 @@ class ContextBudget:
         self.reserve = reserve
         # Exact prompt size of the last request, as reported by the provider.
         self._measured_prompt_tokens: int | None = None
-        # Messages appended since that measurement, which the provider has not counted yet.
-        self._pending_tokens = 0
+        # How many messages that measurement covered. Everything after this index in the
+        # conversation is estimated. Deriving the pending tail from the conversation itself --
+        # rather than from a counter the caller must remember to update -- means a message can
+        # never be appended without being charged.
+        self._measured_message_count = 0
 
     @property
     def enabled(self) -> bool:
@@ -157,33 +195,32 @@ class ContextBudget:
         """The projected-token ceiling at which the agent must finalize."""
         return self.max_context - self.reserve
 
-    def record_usage(self, usage: dict | None) -> None:
-        """Adopt the provider's exact prompt-token count for everything sent so far."""
+    def record_usage(self, usage: dict | None, message_count: int) -> None:
+        """Adopt the provider's exact prompt-token count for the messages it was given.
+
+        ``message_count`` is how many messages were in the request the usage came back from;
+        everything appended after them is estimated until the next measurement.
+        """
         if not usage:
             return
         prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
         if not prompt_tokens:
             return
         self._measured_prompt_tokens = int(prompt_tokens)
-        self._pending_tokens = 0
-
-    def add_pending(self, messages: list[dict] | dict) -> None:
-        """Account for messages appended since the last provider measurement."""
-        if isinstance(messages, dict):
-            messages = [messages]
-        self._pending_tokens += estimate_messages_tokens(messages)
+        self._measured_message_count = message_count
 
     def projected_tokens(self, messages: list[dict], tools: list[dict] | None = None) -> int:
         """Estimated prompt size of the next request.
 
-        Uses the provider's exact count for the measured prefix and adds an estimate for
-        what has been appended since. Before the first response there is nothing measured,
-        so the whole conversation is estimated.
+        Exact for the prefix the provider has already counted, estimated for the tail appended
+        since. Before the first response nothing is measured, so the whole conversation and the
+        tool schemas are estimated.
         """
         if self._measured_prompt_tokens is None:
             return estimate_messages_tokens(messages) + estimate_tools_tokens(tools)
-        # The measured count already includes the tool schemas from the previous request.
-        return self._measured_prompt_tokens + self._pending_tokens
+        # The measured count already includes the tool schemas from that request.
+        tail = messages[self._measured_message_count :]
+        return self._measured_prompt_tokens + estimate_messages_tokens(tail)
 
     def must_finalize(self, messages: list[dict], tools: list[dict] | None = None) -> bool:
         """True when the next request would leave too little room to answer safely."""

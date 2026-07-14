@@ -69,11 +69,6 @@ class Agent:
         self.run_id = str(uuid4())
         self.n_turn = 0
 
-    async def _remember(self, message: Message | list[Message]) -> None:
-        """Add to the conversation and charge it against the context budget."""
-        await self.context.add(message)
-        messages = [message] if isinstance(message, Message) else message
-        self.budget.add_pending([m.to_dict(exclude_none=True) for m in messages])
 
     async def _agent_loop(
         self,
@@ -95,15 +90,15 @@ class Agent:
         # (some servers do not constrain generation, they just stop parsing tool calls). Then, and
         # only then, we drop the tool schemas outright -- which costs the prompt cache.
         drop_tools = False
-        await self._remember(Message(role="system", content=self.system_prompt))
-        await self._remember(Message(role="user", content=prompt))
+        await self.context.add(Message(role="system", content=self.system_prompt))
+        await self.context.add(Message(role="user", content=prompt))
 
         while True:
             n_turn += 1
             if n_turn > max_turns + 1:
                 return f"No final answer after {max_turns} turns."
             if n_turn == max_turns + 1:
-                await self._remember(
+                await self.context.add(
                     Message(
                         role="user",
                         content="Max number of turns reached. Please provide the final answer based on the information you have gathered.",
@@ -115,7 +110,7 @@ class Agent:
                 # Stop while a request still fits, so the run ends with an answer instead of
                 # exploring its way into an unsendable prompt.
                 finalizing = True
-                await self._remember(Message(role="user", content=FINALIZE_MESSAGE))
+                await self.context.add(Message(role="user", content=FINALIZE_MESSAGE))
             # Forbid tool calls rather than removing the tools: the schemas stay in the prompt, so
             # the provider's cached prefix survives the final turn. Dropping them would change the
             # prompt prefix and invalidate the cache for the whole conversation.
@@ -127,9 +122,10 @@ class Agent:
                 event_sink(TurnStarted(n=n_turn))
 
             # call LLM to get next action
+            sent = self.context.get_messages()
             try:
                 step_msg = await self.llm.acall(
-                    messages=self.context.get_messages(),
+                    messages=sent,
                     tools=tools,
                     event_sink=event_sink,
                     turn=n_turn,
@@ -140,10 +136,11 @@ class Agent:
                 await self.context.add(Message(role="assistant", content=error_msg))
                 return error_msg
             self.n_turn = n_turn
-            await self._remember(step_msg)
-            # The provider's own prompt-token count replaces our estimate for everything sent
-            # so far, so estimation error cannot accumulate across turns.
-            self.budget.record_usage(step_msg.usage)
+            await self.context.add(step_msg)
+            # The provider's own prompt-token count replaces our estimate for the messages it was
+            # given, so estimation error cannot accumulate across turns. Everything appended after
+            # those messages is estimated until the next measurement.
+            self.budget.record_usage(step_msg.usage, len(sent))
             if event_sink is not None and step_msg.usage:
                 usage = step_msg.usage
                 prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
@@ -166,7 +163,7 @@ class Agent:
                     for call in step_msg.tool_calls:
                         event_sink(ToolCallStarted(id=call.id, name=call.name, arguments=call.arguments))
                 tools_result_msg = await self.toolset.call(step_msg)
-                await self._remember(tools_result_msg)
+                await self.context.add(tools_result_msg)
                 if citation:
                     record_tool_results(observed, step_msg.tool_calls, tools_result_msg, self.work_dir)
                 if event_sink is not None:
@@ -190,7 +187,7 @@ class Agent:
                 unverified = unverified_citations(observed, parse_citations(step_msg.content or ""), self.work_dir)
                 if unverified and corrections < MAX_CITATION_CORRECTIONS and n_turn <= max_turns:
                     corrections += 1
-                    await self._remember(Message(role="user", content=correction_message(unverified)))
+                    await self.context.add(Message(role="user", content=correction_message(unverified)))
                     continue
                 answer = get_final_answer(step_msg.content or "", observed=observed, cwd=self.work_dir)
                 if event_sink is not None:
