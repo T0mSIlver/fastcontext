@@ -1,6 +1,11 @@
 import os
 
 from fastcontext.agent.agent import Agent
+from fastcontext.agent.budget import (
+    DEFAULT_CONTEXT_RESERVE,
+    DEFAULT_MAX_TOOL_OUTPUT_CHARS,
+    ContextBudget,
+)
 from fastcontext.agent.llm import LLM
 from fastcontext.agent.tool.tool import ToolSet
 from fastcontext.agent.tool.utils import RG_PATH
@@ -24,6 +29,13 @@ def _require_env(name: str, legacy_name: str | None = None) -> str:
     raise RuntimeError(f"Missing required environment variable {name}{legacy_hint}.")
 
 
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        return default
+
+
 def make_fastcontext_agent(
     trajectory_file: str,
     work_dir: str,
@@ -33,6 +45,17 @@ def make_fastcontext_agent(
     system_prompt = kwargs.get("system_prompt", None)
     if system_prompt is None:
         system_prompt = load_system_prompt(work_dir)
+
+    # Context window in tokens. 0 disables the budget (unbounded, the old behavior): we cannot
+    # guess it safely, because a server's usable window is often far below its configured one --
+    # llama.cpp with --parallel 2 halves it per slot.
+    max_context = kwargs.get("max_context")
+    if max_context is None:
+        max_context = _int_env("FC_MAX_CONTEXT", 0)
+    reserve = _int_env("FC_CONTEXT_RESERVE", DEFAULT_CONTEXT_RESERVE)
+    max_tool_output_chars = kwargs.get("max_tool_output_chars")
+    if max_tool_output_chars is None:
+        max_tool_output_chars = _int_env("FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS)
 
     max_tokens = os.getenv("FC_MAX_TOKENS", "4096").strip()
     temperature = os.getenv("FC_TEMPERATURE", "0.7").strip()
@@ -63,7 +86,11 @@ def make_fastcontext_agent(
             "Install it from: https://github.com/BurntSushi/ripgrep"
         )
 
-    toolset = ToolSet([ReadTool(), GlobTool(), GrepTool()], work_dir=work_dir)
+    toolset = ToolSet(
+        [ReadTool(), GlobTool(), GrepTool()],
+        work_dir=work_dir,
+        max_tool_output_chars=max_tool_output_chars,
+    )
     return Agent(
         name=name,
         system_prompt=system_prompt,
@@ -71,4 +98,5 @@ def make_fastcontext_agent(
         toolset=toolset,
         trajectory_file=trajectory_file,
         work_dir=work_dir,
+        budget=ContextBudget(max_context=max_context, reserve=reserve),
     )

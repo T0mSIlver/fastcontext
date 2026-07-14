@@ -28,11 +28,36 @@ def main():
         help="stream the run in a collapsible Textual TUI (every reasoning, tool call and result)",
     )
     parser.add_argument("--citation", action="store_true", help="Only return the citations in the final answer")
+    parser.add_argument(
+        "--max-context",
+        type=int,
+        default=None,
+        help=(
+            "usable context window in tokens. When the conversation approaches it, the agent stops "
+            "exploring and produces its final answer instead of growing the prompt until the "
+            "provider rejects it. 0 disables the budget. Overrides FC_MAX_CONTEXT. Note a server's "
+            "usable window can be well below its configured one (llama.cpp --parallel 2 halves it)."
+        ),
+    )
+    parser.add_argument(
+        "--max-tool-output-chars",
+        type=int,
+        default=None,
+        help=(
+            "truncate a single tool result above this many characters (0 disables). Guards against "
+            "one Read exhausting the whole window. Overrides FC_MAX_TOOL_OUTPUT_CHARS."
+        ),
+    )
 
     args = parser.parse_args()
 
     work_dir = os.getcwd()
-    agent = make_fastcontext_agent(trajectory_file=args.traj, work_dir=work_dir)
+    agent = make_fastcontext_agent(
+        trajectory_file=args.traj,
+        work_dir=work_dir,
+        max_context=args.max_context,
+        max_tool_output_chars=args.max_tool_output_chars,
+    )
 
     prompt = args.query
 

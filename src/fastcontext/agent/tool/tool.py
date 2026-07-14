@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from fastcontext.agent.budget import cap_tool_output
 from fastcontext.agent.llm import Message
 
 MAX_TOOLRUN_TIMEOUT = 10
@@ -49,9 +50,12 @@ class Tool:
 class ToolSet:
     _tool_dict: dict[str, Tool] = {}
 
-    def __init__(self, tools: list[Tool], work_dir: str):
+    def __init__(self, tools: list[Tool], work_dir: str, max_tool_output_chars: int = 0):
         self._tool_dict = {tool.name: tool for tool in tools}
         self.work_dir = work_dir
+        # A single Read can otherwise return 2000 lines x 500 chars (~250k tokens), enough to
+        # blow past any context window in one call and leave no room to even ask for an answer.
+        self.max_tool_output_chars = max_tool_output_chars
 
     def schema_list(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tool_dict.values()]
@@ -105,7 +109,7 @@ class ToolSet:
             tools_result_messages.append(
                 Message(
                     role="tool",
-                    content=tr.output,
+                    content=cap_tool_output(tr.output, self.max_tool_output_chars),
                     tool_call_id=tr.tool_call_id,
                 )
             )
