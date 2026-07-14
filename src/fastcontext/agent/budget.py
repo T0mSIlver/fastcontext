@@ -162,7 +162,14 @@ def required_reserve(max_turn_output_chars: int, max_completion_tokens: int) -> 
         # any promise, so fall back to the flat default.
         return DEFAULT_CONTEXT_RESERVE
     worst_case_turn_tokens = max_turn_output_chars
-    needed = worst_case_turn_tokens + 2 * max_completion_tokens + _RESERVE_SLACK_TOKENS
+    needed = (
+        worst_case_turn_tokens
+        + 2 * max_completion_tokens
+        # The budget is checked BEFORE the finalize message is appended, so its own cost has to be
+        # reserved too.
+        + estimate_tokens(FINALIZE_MESSAGE)
+        + _RESERVE_SLACK_TOKENS
+    )
     return max(DEFAULT_CONTEXT_RESERVE, needed)
 
 

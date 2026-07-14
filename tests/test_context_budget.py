@@ -324,6 +324,42 @@ async def test_agent_drops_tools_if_the_server_ignores_tool_choice_none():
         assert llm.calls[2]["tools"] is None, "fallback must drop the tool schemas"
 
 
+async def test_no_citation_corrections_once_finalizing():
+    # Regression: the citation-correction loop was not guarded by `finalizing`. A model cut off
+    # by the budget is MORE likely to hallucinate citations, which triggered corrections -- each
+    # appending an answer plus a correction message and re-prompting, none of it budget-checked
+    # (must_finalize is not re-evaluated once finalizing is set). On a prompt already at the limit
+    # that grows straight past the window and reproduces the very crash the budget prevents. It is
+    # also futile: with tool calls forbidden the model cannot open the lines it is asked to
+    # confirm, and get_final_answer already drops whatever stays unverified.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "a.py"
+        src.write_text("\n".join(f"line{i}" for i in range(1, 40)), encoding="utf-8")
+        traj = str(Path(tmp) / "t" / "traj.jsonl")
+
+        # The finalize answer cites lines 900-999, which were never read -> unverified.
+        hallucinated = Message(role="assistant", content=f"<final_answer>\n{src}:900-999 (made up)\n</final_answer>")
+        llm = _ScriptedLLM(
+            replies=[_read_call(str(src)), hallucinated],
+            prompt_tokens=[9_500, 9_800],
+        )
+        agent = Agent(
+            name="t",
+            system_prompt="sys",
+            llm=llm,
+            toolset=ToolSet([ReadTool()], work_dir=tmp, max_tool_output_chars=16_000),
+            trajectory_file=traj,
+            work_dir=tmp,
+            budget=ContextBudget(max_context=10_000, reserve=1_000),
+        )
+        result = await agent.run(prompt="q", max_turns=10, citation=True)
+
+        # Exactly two calls: the explore turn and the finalize turn. No correction re-prompts.
+        assert len(llm.calls) == 2, "the budget must not be re-inflated by correction retries"
+        # The unverified citation is dropped, not corrected.
+        assert "900-999" not in result
+
+
 async def test_agent_explores_freely_when_budget_disabled():
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "a.py"

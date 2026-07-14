@@ -184,8 +184,21 @@ class Agent:
                     return step_msg.content
                 # Ask the model to fix citations referencing line ranges it never opened; once the
                 # retries are exhausted, the still-unverified ones are dropped by get_final_answer.
+                #
+                # Never correct while finalizing. Each correction appends an answer plus a
+                # correction message and re-prompts, none of it budget-checked (must_finalize is
+                # not re-evaluated once `finalizing` is set) -- so on a prompt already sitting at
+                # the limit it would grow straight past the window and reproduce the very crash
+                # this budget exists to prevent. It would also be futile: with tool calls forbidden
+                # the model cannot open the lines it is being asked to confirm, and
+                # get_final_answer already drops whatever stays unverified.
                 unverified = unverified_citations(observed, parse_citations(step_msg.content or ""), self.work_dir)
-                if unverified and corrections < MAX_CITATION_CORRECTIONS and n_turn <= max_turns:
+                if (
+                    unverified
+                    and not finalizing
+                    and corrections < MAX_CITATION_CORRECTIONS
+                    and n_turn <= max_turns
+                ):
                     corrections += 1
                     await self.context.add(Message(role="user", content=correction_message(unverified)))
                     continue

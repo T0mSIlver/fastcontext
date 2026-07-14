@@ -1,4 +1,5 @@
 import os
+import sys
 
 from fastcontext.agent.agent import Agent
 from fastcontext.agent.budget import (
@@ -88,6 +89,24 @@ def make_fastcontext_agent(
         raise RuntimeError(
             "Grep tool requires ripgrep (rg) to be installed, but it was not found in current environment.\n"
             "Install it from: https://github.com/BurntSushi/ripgrep"
+        )
+
+    # Say so out loud when the run is unprotected. Silence here reads as "I am safe", and the
+    # failure it hides is the run dying mid-exploration with no answer at all.
+    if max_context <= 0:
+        print(
+            "warning: context budget disabled (FC_MAX_CONTEXT/--max-context is 0). A long "
+            "exploration can grow the prompt until the provider rejects it and the run ends with "
+            "no answer. Set it to the model's usable window -- note a server's usable window is "
+            "often below its configured one (llama.cpp --parallel 2 halves it per slot).",
+            file=sys.stderr,
+        )
+    elif max_tool_output_chars <= 0:
+        print(
+            "warning: tool-output cap disabled (FC_MAX_TOOL_OUTPUT_CHARS is 0) while a context "
+            "budget is set. A single Read can return ~250k tokens and overshoot the window in one "
+            "turn, which the budget cannot undo.",
+            file=sys.stderr,
         )
 
     toolset = ToolSet(
