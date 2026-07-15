@@ -23,7 +23,12 @@ _OVERRIDE_KEYS = (
     "max_tool_output_chars",
     "context_reserve",
     "reasoning_effort",
+    "max_citations",
 )
+
+# A generous default cap: it bounds a runaway/hallucinated citation list without touching the
+# handful a normal answer returns.
+DEFAULT_MAX_CITATIONS = 25
 
 
 def make_fastcontext_agent(
@@ -54,6 +59,7 @@ def make_fastcontext_agent(
     max_tool_output_chars = settings.int_(
         "max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS
     )
+    max_citations = settings.int_("max_citations", "FC_MAX_CITATIONS", DEFAULT_MAX_CITATIONS)
 
     # max_tokens (the per-response completion cap): the resolved source (override > FC_MAX_TOKENS env
     # > config file) feeds provider auto-detection. "auto" (or unset) triggers a lookup of the
@@ -124,4 +130,5 @@ def make_fastcontext_agent(
         trajectory_file=trajectory_file,
         work_dir=work_dir,
         budget=ContextBudget(max_context=max_context, reserve=reserve),
+        max_citations=max_citations,
     )

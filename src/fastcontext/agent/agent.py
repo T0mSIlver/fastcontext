@@ -66,6 +66,7 @@ class Agent:
         trajectory_file: str,
         work_dir: str,
         budget: ContextBudget | None = None,
+        max_citations: int = 0,
     ):
         self.name = name
         self.system_prompt = system_prompt
@@ -74,6 +75,8 @@ class Agent:
         self.context = Context(trajectory_file)
         self.work_dir = work_dir
         self.budget = budget or ContextBudget()
+        # Safety cap on the number of citations in the final answer (0 = unlimited).
+        self.max_citations = max_citations
         self.run_id = str(uuid4())
         self.n_turn = 0
 
@@ -213,7 +216,9 @@ class Agent:
                     corrections += 1
                     await self.context.add(Message(role="user", content=correction_message(unverified)))
                     continue
-                answer = get_final_answer(step_msg.content or "", observed=observed, cwd=self.work_dir)
+                answer = get_final_answer(
+                    step_msg.content or "", observed=observed, cwd=self.work_dir, max_citations=self.max_citations
+                )
                 if event_sink is not None:
                     event_sink(AgentFinished(answer=answer or ""))
                 return answer
