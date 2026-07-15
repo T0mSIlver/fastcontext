@@ -21,6 +21,17 @@ def main():
         default=f".fastcontext/trajectory_{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.jsonl",
     )
     parser.add_argument("--max-turns", type=int, help="maximum number of turns", default=4)
+    parser.add_argument(
+        "--max-tokens",
+        type=str,
+        default=None,
+        metavar="N|auto",
+        help=(
+            "max completion tokens per response: an integer, or 'auto' to fetch the model's "
+            "context length from the provider. Overrides FC_MAX_TOKENS. "
+            "Default: auto-detect, falling back to 4096."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="whether to run in verbose mode")
     parser.add_argument(
         "--tui",
@@ -55,8 +66,10 @@ def main():
     agent = make_fastcontext_agent(
         trajectory_file=args.traj,
         work_dir=work_dir,
+        max_tokens=args.max_tokens,
         max_context=args.max_context,
         max_tool_output_chars=args.max_tool_output_chars,
+        verbose=args.verbose,
     )
 
     prompt = args.query

@@ -1,15 +1,177 @@
 import os
+import sys
 from typing import Any, Literal
 
+import httpx
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageToolCall
 from pydantic import BaseModel, model_serializer
 
 from fastcontext.agent.events import EventSink, StreamClose, StreamDelta, StreamOpen
 
+DEFAULT_MAX_TOKENS = 4096
+
+# Field names different OpenAI-compatible servers use to advertise a model's
+# context/token limit, in priority order. vLLM exposes ``max_model_len`` at the
+# top level; llama.cpp nests ``n_ctx_train`` under ``meta``; TGI uses
+# ``max_total_tokens``; others vary. We scan for the first one we recognise.
+_CONTEXT_LENGTH_KEYS: tuple[str, ...] = (
+    "max_model_len",  # vLLM
+    "max_context_length",
+    "context_length",
+    "context_window",
+    "n_ctx_train",  # llama.cpp (nested under "meta")
+    "n_ctx",  # llama.cpp served context
+    "max_total_tokens",  # TGI
+    "max_position_embeddings",
+)
+
 
 class RequestyAPIError(Exception):
     """Exception for Requesty LLM API errors."""
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    """Return ``value`` as a positive int, or ``None`` if it isn't one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _context_from_arg_tokens(tokens: Any) -> int | None:
+    """Extract usable context from a llama.cpp-style launch-args token list.
+
+    Some routers (e.g. llama.cpp's model swapper) don't expose a context field but
+    list the server's launch flags. ``--ctx-size`` is the total context, shared
+    across ``--parallel`` slots, so usable context per request is
+    ``ctx-size // parallel``.
+    """
+    if not isinstance(tokens, list) or not all(isinstance(t, str) for t in tokens):
+        return None
+    ctx_size = parallel = None
+    for i, tok in enumerate(tokens):
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok in ("--ctx-size", "-c"):
+            ctx_size = _coerce_positive_int(nxt)
+        elif tok in ("--parallel", "-np"):
+            parallel = _coerce_positive_int(nxt)
+    if not ctx_size:
+        return None
+    return ctx_size // parallel if parallel and parallel > 1 else ctx_size
+
+
+def _scan_for_context_length(obj: Any) -> int | None:
+    """Recursively search a decoded ``/models`` entry for a context-length field.
+
+    At each dict level the recognised keys are checked in priority order before
+    descending, so a top-level ``max_model_len`` wins over a nested value. Lists
+    are also probed as possible llama.cpp launch-args.
+    """
+    if isinstance(obj, dict):
+        for key in _CONTEXT_LENGTH_KEYS:
+            if key in obj:
+                found = _coerce_positive_int(obj[key])
+                if found:
+                    return found
+        for value in obj.values():
+            found = _scan_for_context_length(value)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        from_args = _context_from_arg_tokens(obj)
+        if from_args:
+            return from_args
+        for item in obj:
+            found = _scan_for_context_length(item)
+            if found:
+                return found
+    return None
+
+
+def fetch_provider_max_tokens(
+    base_url: str,
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: float = 5.0,
+) -> int | None:
+    """Best-effort lookup of a model's context length from its provider.
+
+    Queries the OpenAI-compatible ``GET {base_url}/models`` endpoint and scans the
+    response for a known context-length field. Returns the discovered value, or
+    ``None`` if the endpoint is unreachable or advertises nothing we recognise.
+    Never raises — auto-detection must not break a run.
+    """
+    if not base_url:
+        return None
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        response = httpx.get(url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return None
+
+    entries: list[Any]
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        entries = payload["data"]
+    elif isinstance(payload, dict):
+        entries = [payload]
+    elif isinstance(payload, list):
+        entries = payload
+    else:
+        return None
+
+    # Prefer the entry whose id matches our model, then fall back to any entry.
+    if model:
+        preferred = [e for e in entries if isinstance(e, dict) and e.get("id") == model]
+        for entry in preferred:
+            found = _scan_for_context_length(entry)
+            if found:
+                return found
+    for entry in entries:
+        found = _scan_for_context_length(entry)
+        if found:
+            return found
+    return None
+
+
+def resolve_max_tokens(
+    explicit: Any = None,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    verbose: bool = False,
+) -> int:
+    """Resolve the effective max_tokens value.
+
+    Precedence: an explicit integer (CLI ``--max-tokens`` or ``FC_MAX_TOKENS``)
+    wins; the literal ``"auto"`` or a missing value triggers a provider lookup via
+    :func:`fetch_provider_max_tokens`; if that yields nothing we fall back to
+    :data:`DEFAULT_MAX_TOKENS`. Diagnostics are written to stderr so they never
+    contaminate the stdout the main agent parses.
+    """
+    raw = None if explicit is None else str(explicit).strip()
+    if raw and raw.lower() != "auto":
+        forced = _coerce_positive_int(raw)
+        if forced:
+            return forced
+        print(f"[fastcontext] ignoring invalid max_tokens {raw!r}; auto-detecting", file=sys.stderr)
+
+    fetched = fetch_provider_max_tokens(base_url, api_key=api_key, model=model) if base_url else None
+    if fetched:
+        if verbose:
+            print(f"[fastcontext] using provider-reported max_tokens={fetched}", file=sys.stderr)
+        return fetched
+
+    if verbose:
+        print(f"[fastcontext] provider max_tokens unavailable; falling back to {DEFAULT_MAX_TOKENS}", file=sys.stderr)
+    return DEFAULT_MAX_TOKENS
 
 
 type Role = Literal[
@@ -55,7 +217,7 @@ class LLM:
         self.model = model
         self.base_url = base_url
         self.client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
-        self.max_tokens = kwargs.get("max_tokens", 4096)
+        self.max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_TOKENS)
         self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
         self.debug = kwargs.get("debug", False)
