@@ -2,7 +2,15 @@
 
 import pytest
 
-from fastcontext.agent.config import load_settings, project_config_path, user_config_path
+import tomllib
+
+from fastcontext.agent.config import (
+    load_settings,
+    project_config_path,
+    render_starter_config,
+    user_config_path,
+    write_starter_config,
+)
 
 # Every env var the settings look at, so a stray value in the test environment
 # can't leak into a case.
@@ -151,6 +159,71 @@ def test_zero_override_is_respected(tmp_path):
     _write(tmp_path / ".fastcontext" / "config.toml", "max_context = 9999\n")
     s = load_settings(str(tmp_path), overrides={"max_context": 0})
     assert s.int_("max_context", "FC_MAX_CONTEXT", 0) == 0
+
+
+# --- init / starter config ---------------------------------------------------
+
+
+def test_starter_config_empty_env_is_valid_toml():
+    text = render_starter_config(env={})
+    data = tomllib.loads(text)  # must parse
+    assert data["base_url"] == "http://127.0.0.1:11434/v1"
+    assert data["model"] == "your-model-name"
+    assert "api_key" not in data  # left commented when unset
+    # tuning keys are commented out by default
+    assert "max_context" not in data
+
+
+def test_starter_config_bakes_in_current_env():
+    env = {
+        "FC_BASE_URL": "http://host:8080/v1",
+        "FC_MODEL": "fastcontext",
+        "FC_API_KEY": "secret",
+        "FC_MAX_TOKENS": "auto",
+        "FC_MAX_CONTEXT": "70000",
+        "FC_REASONING_EFFORT": "none",
+    }
+    data = tomllib.loads(render_starter_config(env=env))
+    assert data["base_url"] == "http://host:8080/v1"
+    assert data["model"] == "fastcontext"
+    assert data["api_key"] == "secret"
+    assert data["max_tokens"] == "auto"  # non-numeric -> quoted string
+    assert data["max_context"] == 70000  # numeric -> bare int
+    assert data["reasoning_effort"] == "none"
+
+
+def test_starter_config_uses_legacy_env_alias():
+    data = tomllib.loads(render_starter_config(env={"MODEL": "legacy-model", "BASE_URL": "http://x/v1"}))
+    assert data["model"] == "legacy-model"
+    assert data["base_url"] == "http://x/v1"
+
+
+def test_write_starter_config_creates_file(tmp_path):
+    target = tmp_path / "sub" / "config.toml"
+    written = write_starter_config(target, env={"FC_MODEL": "m", "FC_BASE_URL": "http://x/v1"})
+    assert written == target
+    assert tomllib.loads(target.read_text())["model"] == "m"
+
+
+def test_write_starter_config_refuses_existing(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text("model = \"keep\"\n")
+    with pytest.raises(FileExistsError):
+        write_starter_config(target, env={})
+    assert "keep" in target.read_text()  # untouched
+
+
+def test_write_starter_config_force_overwrites(tmp_path):
+    target = tmp_path / "config.toml"
+    target.write_text("model = \"old\"\n")
+    write_starter_config(target, force=True, env={"FC_MODEL": "new", "FC_BASE_URL": "http://x/v1"})
+    assert tomllib.loads(target.read_text())["model"] == "new"
+
+
+def test_write_starter_config_is_owner_only(tmp_path):
+    target = tmp_path / "config.toml"
+    write_starter_config(target, env={})
+    assert (target.stat().st_mode & 0o777) == 0o600
 
 
 if __name__ == "__main__":

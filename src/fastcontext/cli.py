@@ -1,9 +1,28 @@
 import argparse
 import asyncio
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from fastcontext.agent.agent_factory import make_fastcontext_agent
+
+
+def _run_init(args) -> int:
+    """`fastcontext init`: scaffold a starter config file."""
+    from fastcontext.agent.config import user_config_path, write_starter_config
+
+    path = Path(args.path).expanduser() if args.path else user_config_path()
+    try:
+        written = write_starter_config(path, force=args.force)
+    except FileExistsError:
+        print(f"{path} already exists; pass --force to overwrite.", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"could not write {path}: {exc}", file=sys.stderr)
+        return 1
+    print(f"Wrote starter config to {written}\nEdit it, then run: fastcontext -q \"...\"")
+    return 0
 
 
 def main():
@@ -11,6 +30,19 @@ def main():
     parser = argparse.ArgumentParser(
         description="FastContext CLI",
     )
+
+    # Optional subcommands. Without one, the arguments below run an exploration, so the existing
+    # `fastcontext -q "..."` invocation is unchanged.
+    subparsers = parser.add_subparsers(dest="command")
+    init_parser = subparsers.add_parser("init", help="scaffold a starter config.toml (from current FC_* env vars)")
+    init_parser.add_argument(
+        "--path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="where to write the config (default: $XDG_CONFIG_HOME/fastcontext/config.toml).",
+    )
+    init_parser.add_argument("--force", action="store_true", help="overwrite an existing config file.")
 
     parser.add_argument("--query", "-q", type=str, help="query to ask the agent")
     parser.add_argument(
@@ -72,6 +104,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.command == "init":
+        raise SystemExit(_run_init(args))
 
     work_dir = os.getcwd()
     agent = make_fastcontext_agent(
