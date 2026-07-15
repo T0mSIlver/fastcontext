@@ -7,7 +7,7 @@ from fastcontext.agent.budget import (
     ContextBudget,
     required_reserve,
 )
-from fastcontext.agent.llm import LLM
+from fastcontext.agent.llm import LLM, resolve_max_tokens
 from fastcontext.agent.tool.tool import ToolSet
 from fastcontext.agent.tool.utils import RG_PATH
 from fastcontext.agent.utils import load_system_prompt
@@ -47,6 +47,10 @@ def make_fastcontext_agent(
     if system_prompt is None:
         system_prompt = load_system_prompt(work_dir)
 
+    model = _require_env("FC_MODEL", "MODEL")
+    api_key = _get_env("FC_API_KEY", "API_KEY")
+    base_url = _require_env("FC_BASE_URL", "BASE_URL")
+
     # Context window in tokens. 0 disables the budget (unbounded, the old behavior): we cannot
     # guess it safely, because a server's usable window is often far below its configured one --
     # llama.cpp with --parallel 2 halves it per slot.
@@ -57,23 +61,32 @@ def make_fastcontext_agent(
     if max_tool_output_chars is None:
         max_tool_output_chars = _int_env("FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS)
 
-    max_tokens = os.getenv("FC_MAX_TOKENS", "4096").strip()
+    # max_tokens (the per-response completion cap) precedence: explicit CLI arg > FC_MAX_TOKENS env
+    # > provider auto-detection > built-in default. "auto" (or unset) triggers a lookup of the
+    # model's context length from the provider's /models endpoint.
+    max_tokens_source = kwargs.get("max_tokens")
+    if max_tokens_source is None:
+        max_tokens_source = os.getenv("FC_MAX_TOKENS")
+    max_tokens = resolve_max_tokens(
+        max_tokens_source,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        verbose=kwargs.get("verbose", False),
+    )
+
     temperature = os.getenv("FC_TEMPERATURE", "0.7").strip()
-    try:
-        max_tokens = int(max_tokens)
-    except ValueError:
-        max_tokens = 4096
     try:
         temperature = float(temperature)
     except ValueError:
         temperature = 0.7
 
     llm = LLM(
-        model=_require_env("FC_MODEL", "MODEL"),
-        api_key=_get_env("FC_API_KEY", "API_KEY"),
-        base_url=_require_env("FC_BASE_URL", "BASE_URL"),
-        max_tokens=int(max_tokens),
-        temperature=float(temperature),
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
 
     # The budget trips only after a turn's tool results have landed, so the reserve must absorb a
