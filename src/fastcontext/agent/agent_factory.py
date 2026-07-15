@@ -1,4 +1,3 @@
-import os
 import sys
 
 from fastcontext.agent.agent import Agent
@@ -7,34 +6,24 @@ from fastcontext.agent.budget import (
     ContextBudget,
     required_reserve,
 )
+from fastcontext.agent.config import load_settings
 from fastcontext.agent.llm import LLM, resolve_max_tokens
 from fastcontext.agent.tool.tool import ToolSet
 from fastcontext.agent.tool.utils import RG_PATH
 from fastcontext.agent.utils import load_system_prompt
 
-
-def _get_env(name: str, legacy_name: str | None = None) -> str | None:
-    value = os.getenv(name)
-    if value:
-        return value
-    if legacy_name:
-        return os.getenv(legacy_name)
-    return None
-
-
-def _require_env(name: str, legacy_name: str | None = None) -> str:
-    value = _get_env(name, legacy_name)
-    if value:
-        return value
-    legacy_hint = f" or {legacy_name}" if legacy_name else ""
-    raise RuntimeError(f"Missing required environment variable {name}{legacy_hint}.")
-
-
-def _int_env(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)).strip())
-    except ValueError:
-        return default
+# Config keys that may be passed as explicit overrides via kwargs (highest precedence).
+_OVERRIDE_KEYS = (
+    "model",
+    "base_url",
+    "api_key",
+    "temperature",
+    "max_tokens",
+    "max_context",
+    "max_tool_output_chars",
+    "context_reserve",
+    "reasoning_effort",
+)
 
 
 def make_fastcontext_agent(
@@ -43,43 +32,40 @@ def make_fastcontext_agent(
     **kwargs,
 ) -> Agent:
     name = "FastContext"
-    system_prompt = kwargs.get("system_prompt", None)
-    if system_prompt is None:
-        system_prompt = load_system_prompt(work_dir)
+    system_prompt = kwargs.get("system_prompt") or load_system_prompt(work_dir)
 
-    model = _require_env("FC_MODEL", "MODEL")
-    api_key = _get_env("FC_API_KEY", "API_KEY")
-    base_url = _require_env("FC_BASE_URL", "BASE_URL")
+    # Resolve every knob through the layered config: override > FC_* env > project/user config file
+    # > default. This lets a config file supply the endpoint and tuning once, so callers (and the
+    # coding agent driving this over bash) need not re-declare them on each invocation.
+    settings = load_settings(
+        work_dir,
+        overrides={key: kwargs.get(key) for key in _OVERRIDE_KEYS},
+        config_path=kwargs.get("config_path"),
+    )
+
+    model = settings.require("model", "FC_MODEL", "MODEL")
+    api_key = settings.str_("api_key", "FC_API_KEY", "API_KEY")
+    base_url = settings.require("base_url", "FC_BASE_URL", "BASE_URL")
 
     # Context window in tokens. 0 disables the budget (unbounded, the old behavior): we cannot
     # guess it safely, because a server's usable window is often far below its configured one --
     # llama.cpp with --parallel 2 halves it per slot.
-    max_context = kwargs.get("max_context")
-    if max_context is None:
-        max_context = _int_env("FC_MAX_CONTEXT", 0)
-    max_tool_output_chars = kwargs.get("max_tool_output_chars")
-    if max_tool_output_chars is None:
-        max_tool_output_chars = _int_env("FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS)
+    max_context = settings.int_("max_context", "FC_MAX_CONTEXT", 0)
+    max_tool_output_chars = settings.int_(
+        "max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS
+    )
 
-    # max_tokens (the per-response completion cap) precedence: explicit CLI arg > FC_MAX_TOKENS env
-    # > provider auto-detection > built-in default. "auto" (or unset) triggers a lookup of the
-    # model's context length from the provider's /models endpoint.
-    max_tokens_source = kwargs.get("max_tokens")
-    if max_tokens_source is None:
-        max_tokens_source = os.getenv("FC_MAX_TOKENS")
+    # max_tokens (the per-response completion cap): the resolved source (override > FC_MAX_TOKENS env
+    # > config file) feeds provider auto-detection. "auto" (or unset) triggers a lookup of the
+    # model's context length from the provider's /models endpoint; otherwise an integer is used.
     max_tokens = resolve_max_tokens(
-        max_tokens_source,
+        settings.raw("max_tokens", "FC_MAX_TOKENS"),
         base_url=base_url,
         api_key=api_key,
         model=model,
         verbose=kwargs.get("verbose", False),
     )
-
-    temperature = os.getenv("FC_TEMPERATURE", "0.7").strip()
-    try:
-        temperature = float(temperature)
-    except ValueError:
-        temperature = 0.7
+    temperature = settings.float_("temperature", "FC_TEMPERATURE", 0.7)
 
     llm = LLM(
         model=model,
@@ -87,12 +73,15 @@ def make_fastcontext_agent(
         base_url=base_url,
         max_tokens=max_tokens,
         temperature=temperature,
+        reasoning_effort=settings.str_("reasoning_effort", "FC_REASONING_EFFORT"),
     )
 
     # The budget trips only after a turn's tool results have landed, so the reserve must absorb a
     # full turn of tool output plus the completion -- otherwise the agent can cross the limit and
     # find that even the final-answer request no longer fits.
-    reserve = _int_env("FC_CONTEXT_RESERVE", 0) or required_reserve(max_tool_output_chars, int(max_tokens))
+    reserve = settings.int_("context_reserve", "FC_CONTEXT_RESERVE", 0) or required_reserve(
+        max_tool_output_chars, max_tokens
+    )
 
     from fastcontext.agent.tool.glob import GlobTool
     from fastcontext.agent.tool.grep import GrepTool
