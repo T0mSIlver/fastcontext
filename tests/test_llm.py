@@ -1,57 +1,30 @@
-import os
+"""Live LLM tests. Skipped unless FC_MODEL and FC_BASE_URL are set (see conftest)."""
 
 from fastcontext.agent.llm import LLM
+from fastcontext.agent.tool.read import ReadTool
 
 
-async def test_llm():
-    llm = LLM(
-        model=os.getenv("MODEL"),
-        api_key=os.getenv("API_KEY"),
-        base_url=os.getenv("BASE_URL"),
-    )
-    messages = [
-        {"role": "user", "content": "Hello, how are you?"},
-    ]
-    msg = await llm.acall(
-        messages=messages,
-        tools=None,
-    )
-    print(msg.to_dict())
+async def test_llm(llm_endpoint):
+    llm = LLM(**llm_endpoint)
+    messages = [{"role": "user", "content": "Hello, how are you?"}]
+    msg = await llm.acall(messages=messages, tools=None)
+    assert msg.role == "assistant"
+    assert msg.content is not None
 
 
-async def test_llm_tools():
-    llm = LLM(
-        model=os.getenv("MODEL"),
-        api_key=os.getenv("API_KEY"),
-        base_url=os.getenv("BASE_URL"),
-        temperature=0.0,
-        max_tokens=1024,
-    )
+async def test_llm_tools(llm_endpoint):
+    llm = LLM(**llm_endpoint, temperature=0.0, max_tokens=1024)
     messages = [
         {"role": "system", "content": "You are a powerful AI agent."},
-        {
-            "role": "user",
-            "content": "read file content from ./test_llm.py and ./README.md",
-        },
+        {"role": "user", "content": "read file content from ./test_llm.py and ./README.md"},
     ]
-    from fastcontext.agent.tool.read import ReadFileTool
-
-    msg = await llm.acall(
-        messages=messages,
-        tools=[ReadFileTool().schema()],
-        debug=True,
-    )
-    print(msg.to_dict())
+    msg = await llm.acall(messages=messages, tools=[ReadTool().schema()])
+    # The model should either answer or ask to call the Read tool.
+    assert msg.content is not None or msg.tool_calls
 
 
-async def test_llm_tools_result():
-    llm = LLM(
-        model=os.getenv("MODEL"),
-        api_key=os.getenv("API_KEY"),
-        base_url=os.getenv("BASE_URL"),
-        temperature=0.0,
-        max_tokens=1024,
-    )
+async def test_llm_tools_result(llm_endpoint):
+    llm = LLM(**llm_endpoint, temperature=0.0, max_tokens=1024)
     messages = [
         {"role": "system", "content": "You are a powerful AI agent."},
         {"role": "user", "content": "please show me the current time"},
@@ -59,39 +32,11 @@ async def test_llm_tools_result():
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {
-                    "id": "call_0",
-                    "function": {"arguments": '{"command": "date"}', "name": "bash"},
-                    "type": "function",
-                },
-                {
-                    "id": "call_1",
-                    "function": {"arguments": '{"command": "date"}', "name": "bash"},
-                    "type": "function",
-                },
+                {"id": "call_0", "function": {"arguments": '{"command": "date"}', "name": "bash"}, "type": "function"},
             ],
         },
-        {
-            "role": "tool",
-            "content": "Thu Aug 21 17:42:44 CST 2025",
-            "tool_call_id": "call_0",
-        },
-        {
-            "role": "tool",
-            "content": "Thu Aug 21 17:42:44 CST 2025",
-            "tool_call_id": "call_1",
-            "name": "bash",
-        },
+        {"role": "tool", "content": "Thu Aug 21 17:42:44 CST 2025", "tool_call_id": "call_0"},
     ]
-    msg = await llm.acall(
-        messages=messages,
-        tools=None,
-    )
-    print(msg.to_dict())
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    # asyncio.run(test_llm())
-    asyncio.run(test_llm_tools())
+    msg = await llm.acall(messages=messages, tools=None)
+    assert msg.role == "assistant"
+    assert msg.content is not None
