@@ -221,6 +221,7 @@ class LLM:
         self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
         self.debug = kwargs.get("debug", False)
+        self.reasoning_effort = kwargs.get("reasoning_effort")
 
     async def acall(
         self,
@@ -241,7 +242,7 @@ class LLM:
             "temperature": self.temperature,
             "top_p": self.top_p,
         }
-        reasoning_effort = os.getenv("FC_REASONING_EFFORT")
+        reasoning_effort = self.reasoning_effort or os.getenv("FC_REASONING_EFFORT")
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
         if "qwen" in self.model:

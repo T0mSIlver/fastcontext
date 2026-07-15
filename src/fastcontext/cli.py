@@ -59,6 +59,17 @@ def main():
             "one Read exhausting the whole window. Overrides FC_MAX_TOOL_OUTPUT_CHARS."
         ),
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "path to a TOML config file (overrides FC_CONFIG and config-file discovery). "
+            "Without it, settings are read from ./.fastcontext/config.toml then "
+            "$XDG_CONFIG_HOME/fastcontext/config.toml. Env vars and CLI flags still win."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -70,6 +81,7 @@ def main():
         max_context=args.max_context,
         max_tool_output_chars=args.max_tool_output_chars,
         verbose=args.verbose,
+        config_path=args.config,
     )
 
     prompt = args.query
