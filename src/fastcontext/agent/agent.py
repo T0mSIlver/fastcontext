@@ -25,6 +25,14 @@ from fastcontext.agent.utils import get_final_answer, parse_citations
 MAX_CITATION_CORRECTIONS = 2
 
 
+class AgentRunError(RuntimeError):
+    """The run failed to produce an answer (e.g. the LLM endpoint was unreachable).
+
+    Raised instead of returning the failure text so a caller can tell a failed run from a normal
+    one by catching this (the CLI turns it into a nonzero exit) rather than string-matching stdout.
+    """
+
+
 def _looks_like_unparsed_tool_call(message: Message) -> bool:
     """True when the model wrote a tool call as plain text instead of answering.
 
@@ -132,9 +140,12 @@ class Agent:
                     tool_choice=tool_choice,
                 )
             except RequestyAPIError as e:
+                # Record the failure to the trajectory, then raise so the caller sees a failed run
+                # instead of a normal return of the error text (which exited 0 and forced callers to
+                # grep stdout for "LLM API call failed").
                 error_msg = f"LLM API call failed. So stopping the agent.\nError details:\n{str(e)}"
                 await self.context.add(Message(role="assistant", content=error_msg))
-                return error_msg
+                raise AgentRunError(error_msg) from e
             self.n_turn = n_turn
             await self.context.add(step_msg)
             # The provider's own prompt-token count replaces our estimate for the messages it was
