@@ -28,7 +28,9 @@ Example ``~/.config/fastcontext/config.toml``::
 from __future__ import annotations
 
 import os
+import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,22 @@ import tomllib
 USER_CONFIG_DIR = "fastcontext"
 CONFIG_BASENAME = "config.toml"
 PROJECT_CONFIG_DIR = ".fastcontext"
+
+# Config-file key -> (primary env var, legacy env var) it mirrors. Drives both discovery docs and
+# `init`, which seeds a starter file from whatever FC_* vars are currently set.
+_ENDPOINT_KEYS = (
+    ("base_url", "FC_BASE_URL", "BASE_URL"),
+    ("model", "FC_MODEL", "MODEL"),
+    ("api_key", "FC_API_KEY", "API_KEY"),
+)
+_TUNING_KEYS = (
+    ("max_tokens", "FC_MAX_TOKENS", None),
+    ("max_context", "FC_MAX_CONTEXT", None),
+    ("max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", None),
+    ("context_reserve", "FC_CONTEXT_RESERVE", None),
+    ("reasoning_effort", "FC_REASONING_EFFORT", None),
+    ("temperature", "FC_TEMPERATURE", None),
+)
 
 
 def user_config_path() -> Path:
@@ -144,3 +162,69 @@ def load_settings(
         project = _load_toml(project_config_path(work_dir))
         file_values = {**user, **project}
     return Settings(file_values, overrides)
+
+
+def _toml_quote(value: str) -> str:
+    """Quote a string as a TOML basic string (stdlib tomllib is read-only)."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def render_starter_config(env: Mapping[str, str] | None = None) -> str:
+    """Render a commented starter ``config.toml``.
+
+    Any relevant ``FC_*`` (or legacy) variable already present in ``env`` is
+    baked in as an active setting, so ``fastcontext init`` can freeze a working
+    shell environment into a file; everything else is left as a commented hint.
+    """
+    env = os.environ if env is None else env
+
+    def current(primary: str, legacy: str | None) -> str | None:
+        value = env.get(primary)
+        if not value and legacy:
+            value = env.get(legacy)
+        return value.strip() if value and value.strip() else None
+
+    lines = [
+        "# FastContext configuration -- keys mirror the FC_* env vars without the prefix.",
+        "# Precedence: CLI flag > FC_* env var > project config > this file > built-in default.",
+        "",
+    ]
+    for key, primary, legacy in _ENDPOINT_KEYS:
+        value = current(primary, legacy)
+        if value is not None:
+            lines.append(f"{key} = {_toml_quote(value)}")
+        elif key == "api_key":
+            lines.append('# api_key = "..."   # only if your endpoint requires authentication')
+        else:
+            placeholder = "http://127.0.0.1:11434/v1" if key == "base_url" else "your-model-name"
+            lines.append(f"{key} = {_toml_quote(placeholder)}")
+
+    lines += ["", "# Optional tuning (uncomment to override defaults):"]
+    for key, primary, _ in _TUNING_KEYS:
+        value = env.get(primary)
+        value = value.strip() if value and value.strip() else None
+        if value is not None:
+            # Quote non-numeric values (e.g. reasoning_effort, or max_tokens = "auto").
+            rendered = value if value.lstrip("-").isdigit() else _toml_quote(value)
+            lines.append(f"{key} = {rendered}")
+        else:
+            lines.append(f"# {key} =")
+    return "\n".join(lines) + "\n"
+
+
+def write_starter_config(path: Path, force: bool = False, env: Mapping[str, str] | None = None) -> Path:
+    """Write a starter config to `path`. Raises FileExistsError unless `force`.
+
+    The file is created with owner-only permissions (0600) since it may hold an
+    API key.
+    """
+    if path.exists() and not force:
+        raise FileExistsError(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_starter_config(env), encoding="utf-8")
+    try:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass  # best-effort on platforms without POSIX permissions
+    return path
