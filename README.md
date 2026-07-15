@@ -101,7 +101,8 @@ uv sync --all-groups
 
 ## Configuration
 
-FastContext is configured through environment variables. Only the model and endpoint are required.
+FastContext is configured through a [config file](#configuration-file), environment variables, or CLI
+flags. Only the model and endpoint are required.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
@@ -116,6 +117,41 @@ FastContext is configured through environment variables. Only the model and endp
 | `FC_REASONING_EFFORT` | — | — | Passed through to servers that support it (`none`/`low`/`medium`/`high`/`max`). |
 
 CLI flags override the matching environment variable for a single run.
+
+### Configuration file
+
+Re-exporting these on every call is wasteful — especially when a coding agent drives FastContext over
+`bash`. Set them once in a TOML file instead; keys mirror the `FC_*` variables without the prefix:
+
+```toml
+# ~/.config/fastcontext/config.toml
+base_url = "http://127.0.0.1:11434/v1"
+model    = "fastcontext"
+api_key  = "dummy"                 # omit if your endpoint needs no auth
+
+# optional tuning
+max_tokens = "auto"                # int, or "auto" to detect from the provider
+max_context = 70000                # usable window; enables the context budget
+max_tool_output_chars = 16000
+reasoning_effort = "none"
+temperature = 0.0
+```
+
+With that in place, `fastcontext -q "…"` just works — no env vars required. Settings resolve with this
+precedence (highest first):
+
+```text
+CLI flag  >  FC_* env var  >  project config  >  user config  >  built-in default
+```
+
+| Source | Location |
+| --- | --- |
+| **User config** | `${XDG_CONFIG_HOME:-~/.config}/fastcontext/config.toml` — set the endpoint once per machine. |
+| **Project config** | `./.fastcontext/config.toml` (searched upward from the working directory) — pin per-repo settings. |
+| **Explicit** | `--config PATH` or `FC_CONFIG=PATH` — bypasses discovery and uses that file. |
+
+Environment variables and CLI flags remain the highest-priority overrides, so existing setups keep
+working — a config file only makes them optional.
 
 ## Quick start — watch a run in the TUI
 
@@ -215,6 +251,7 @@ fastcontext -q "<query>" [options]
 | `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
 | `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
 | `--max-tool-output-chars` | Truncate any single tool result above this size (`0` disables). Overrides `FC_MAX_TOOL_OUTPUT_CHARS`. |
+| `--config` | Path to a TOML config file. Overrides `FC_CONFIG` and config-file discovery. |
 
 ## Sizing tokens and the context budget
 
