@@ -121,7 +121,14 @@ CLI flags override the matching environment variable for a single run.
 ### Configuration file
 
 Re-exporting these on every call is wasteful — especially when a coding agent drives FastContext over
-`bash`. Set them once in a TOML file instead; keys mirror the `FC_*` variables without the prefix:
+`bash`. Set them once in a TOML file instead; keys mirror the `FC_*` variables without the prefix.
+
+Scaffold one with `fastcontext init` — it writes a starter file (owner-readable only) and bakes in any
+`FC_*` variables you already have exported, so you can freeze a working shell into a config in one step:
+
+```bash
+fastcontext init            # -> $XDG_CONFIG_HOME/fastcontext/config.toml (--path / --force available)
+```
 
 ```toml
 # ~/.config/fastcontext/config.toml
