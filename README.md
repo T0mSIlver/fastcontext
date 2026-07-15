@@ -1,349 +1,301 @@
-# FastContext: Training Efficient Repository Explorer for Coding Agents
+# FastContext
 
-<p align="center">
-  <a href="https://arxiv.org/abs/2606.14066"><img src="https://img.shields.io/badge/arXiv-2606.14066-b31b1b.svg" alt="arXiv"></a>
-  <a href="https://github.com/microsoft/fastcontext"><img src="https://img.shields.io/badge/Code-GitHub-181717.svg" alt="Code"></a>
-  <img src="https://img.shields.io/badge/Python-3.12%2B-blue.svg" alt="Python 3.12+">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
-</p>
+**A read-only repository-exploration agent that a coding agent delegates to over `bash`.**
 
-<p align="center">
-  <a href="#news">📰 News</a> |
-  <a href="#overview">🔎 Overview</a> |
-  <a href="#results">📊 Results</a> |
-  <a href="#quick-start">⚡ Quick Start</a> |
-  <a href="#reproduction">🧪 Reproduction</a> |
-  <a href="#citation">📚 Citation</a>
-</p>
+Instead of letting a main coding agent burn its own context window on broad file reads and code
+searches, it shells out a natural-language question to FastContext. FastContext explores the
+repository with read-only tools, then returns a short, cited answer — file paths and line ranges the
+main agent can act on directly. Exploration happens in a *separate* process, so the noise of grepping
+and reading never lands in the main agent's context.
 
-FastContext is a lightweight repository-exploration subagent for coding agents. Instead of letting the main
-coding agent spend its own context window on broad file reads and code searches, the main agent delegates
-a natural-language context query to FastContext. FastContext explores the repository with read-only tools,
-issues independent tool calls in parallel, and returns compact file-line citations as focused evidence for the
-main agent.
+```text
+main agent ──"where is request validation done?"──▶  fastcontext -q ... (read-only explore)
+          ◀──────────  <final_answer> src/router.py:42-58 … </final_answer>  ──────────┘
+```
 
-<p align="center">
-  <img src="figures/overview.png" alt="FastContext overview" width="95%">
-</p>
+This is a fork focused on making that harness robust and pleasant to operate: a live **TUI** to watch
+a run, **context-budget** management so long explorations answer instead of dying, **provider
+auto-detection** of token limits, **citation validation** that drops hallucinated line ranges, and a
+small **eval harness**. See [Fork features](#fork-features) for the full list.
 
-## News
+---
 
-- 🚀 **2026-06-15**: We released the arXiv paper [[📄 arXiv](https://arxiv.org/abs/2606.14066)] and the model weights [[🤗 Model](https://huggingface.co/collections/microsoft/swe-fastcontext)].
+## Table of contents
 
+- [What it does](#what-it-does)
+- [Fork features](#fork-features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Quick start — watch a run in the TUI](#quick-start--watch-a-run-in-the-tui)
+- [How a coding agent uses it (over bash)](#how-a-coding-agent-uses-it-over-bash)
+- [CLI reference](#cli-reference)
+- [Sizing tokens and the context budget](#sizing-tokens-and-the-context-budget)
+- [Programmatic use](#programmatic-use)
+- [Evaluation harness](#evaluation-harness)
+- [Background](#background)
 
-## Overview
+---
 
-Modern coding agents often use the same model to explore a repository and solve the task. This makes
-exploration expensive: exploratory reads and searches consume tokens, stay in the solver's history, and can
-pollute later reasoning with irrelevant snippets.
+## What it does
 
-FastContext separates repository exploration from solving:
+FastContext runs a small agent loop against an **OpenAI-compatible** chat-completions endpoint
+(llama.cpp, Ollama, vLLM, or a hosted API). Each turn the model may call read-only tools; when it has
+enough evidence it emits a `<final_answer>` block:
 
-- 🧭 **Delegated exploration**: the main agent asks FastContext for repository context before editing or answering.
-- 🔒 **Read-only tools**: FastContext uses `Read`, `Glob`, and `Grep`; it does not modify files.
-- ⚙️ **Parallel tool calling**: independent reads and searches can be issued in the same exploration turn.
-- 📌 **Compact evidence**: the final response is a short `<final_answer>` block with file paths and line ranges.
-- 🧠 **Trainable explorers**: the paper trains 4B-30B exploration models with SFT and task-grounded RL.
+| Tool | Purpose |
+| --- | --- |
+| `Read` | Read a file (optionally a line range). |
+| `Glob` | List files by glob pattern, newest first. |
+| `Grep` | Search file contents with ripgrep (`rg`). |
 
-The intended contract is simple: FastContext finds the relevant code; the main coding agent uses that focused
-evidence to edit, test, or answer.
+The final answer is compact, machine-parseable evidence:
 
 ```text
 <final_answer>
-/path/to/repo/src/router.py:42-58
-/path/to/repo/tests/test_router.py:101-119
+src/fastcontext/agent/tool/read.py:13-64
+src/fastcontext/agent/tool/grep.py:9-120
 </final_answer>
 ```
 
-## Results
+The contract is deliberately narrow: **FastContext finds the relevant code; your main agent decides
+what to do with it.** It never edits files.
 
-Across SWE-bench Multilingual, SWE-bench Pro, and SWE-QA, FastContext improves the score-token tradeoff of
-Mini-SWE-Agent style coding agents.
+## Fork features
 
-| Result | Finding |
-| --- | --- |
-| 📈 End-to-end success | Up to **+5.5** score improvement with delegated repository exploration. |
-| 💸 Main-agent token use | Up to **60.3%** fewer main-agent tokens. |
-| 🧠 Compact trained explorer | FC-4B-RL improves or ties FC-4B-SFT across all reported end-to-end settings. |
-| 🎯 Standalone exploration | Trained FastContext models recover patch-relevant files and symbols more accurately than non-FastContext small-model baselines. |
+Everything below is in this fork on top of the original explorer:
 
-<p align="center">
-  <img src="figures/main-result.png" alt="FastContext main results" width="95%">
-</p>
-
-## Token Efficiency
-
-FastContext reduces the main agent's context burden by moving broad repository exploration outside the
-solver trajectory. The reduction is especially visible in file-reading and code-search tokens.
-
-<p align="center">
-  <img src="figures/breakdown.png" alt="FastContext token breakdown" width="95%">
-</p>
+- 🖥️ **Live TUI run inspector** (`--tui`) — stream a run as collapsible rows (reasoning, each tool
+  call, each result, the final answer) with a docked token-usage bar. Far more legible than dumping
+  raw JSON. See [Quick start](#quick-start--watch-a-run-in-the-tui).
+- 🧮 **Context-budget management** (`--max-context`, `--max-tool-output-chars`) — tracks the growing
+  conversation and, as it approaches the window, tells the agent to answer *now* instead of exploring
+  its way into a prompt the server rejects. A per-tool-output cap stops one giant `Read` from blowing
+  the window in a single turn.
+- 🔎 **Provider token auto-detection** (`--max-tokens auto`) — queries the provider's `/models`
+  endpoint to discover the model's real context length (including llama.cpp swapper launch args,
+  where usable context is `ctx-size ÷ parallel`) instead of guessing a hardcoded default.
+- 📌 **Citation validation** — line ranges the model never actually opened during exploration are
+  dropped from the answer, so a hallucinated citation can't slip through.
+- 🧭 **Robust path handling** — mangled or relative tool-call paths are resolved against the working
+  directory; absolute workspace paths are primed into the prompt.
+- 🪟 **Cross-platform ripgrep** — `rg` is located with `shutil.which`, output is decoded as UTF-8, and
+  ripgrep invocations have a subprocess timeout.
+- 🧾 **Trajectory recording** — every run is written to a JSONL trajectory (`--traj`) for replay and
+  scoring.
+- 📊 **Eval harness** (`eval/`) — run branches from isolated worktrees against (repo, query) tasks and
+  compare turns, tool calls, failed/duplicate calls, citation quality, and tokens. See
+  [Evaluation harness](#evaluation-harness).
 
 ## Installation
 
-FastContext requires Python 3.12 or newer. The repository uses [`uv`](https://docs.astral.sh/uv/) for package
-and environment management.
-
-Install the CLI from the repository root:
+FastContext requires **Python 3.12+** and uses [`uv`](https://docs.astral.sh/uv/). It also needs
+[ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on `PATH` for the `Grep` tool.
 
 ```bash
+# install the CLI from the repo root
 uv tool install .
-```
 
-For development:
-
-```bash
+# …or set up a dev environment
 uv sync --all-groups
 ```
 
-Build a local wheel:
+## Configuration
+
+FastContext is configured through environment variables. Only the model and endpoint are required.
+
+| Variable | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `FC_MODEL` | ✅ | — | Model name/id served by the endpoint (legacy alias: `MODEL`). |
+| `FC_BASE_URL` | ✅ | — | OpenAI-compatible base URL, e.g. `http://127.0.0.1:11434/v1` (alias: `BASE_URL`). |
+| `FC_API_KEY` | — | — | Sent as a bearer token when the endpoint requires auth (alias: `API_KEY`). |
+| `FC_TEMPERATURE` | — | `0.7` | Sampling temperature. |
+| `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
+| `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
+| `FC_MAX_TOOL_OUTPUT_CHARS` | — | `16000` | Truncate a single tool result above this many characters (`0` disables). |
+| `FC_CONTEXT_RESERVE` | — | auto | Tokens held back from the budget for one turn of tool output + the completion. |
+| `FC_REASONING_EFFORT` | — | — | Passed through to servers that support it (`none`/`low`/`medium`/`high`/`max`). |
+
+CLI flags override the matching environment variable for a single run.
+
+## Quick start — watch a run in the TUI
+
+The TUI is the easiest way to *see* what FastContext does. Point it at a local endpoint and pass
+`--tui`:
 
 ```bash
-uv build
-```
-
-The built wheel is written under `dist/`, for example:
-
-```text
-dist/fastcontext-0.1.0-py3-none-any.whl
-```
-
-## Model Configuration
-
-FastContext expects an OpenAI-compatible chat completions endpoint. For direct CLI usage, configure:
-
-```bash
-export FC_BASE_URL="https://your-endpoint.example/v1"
-export FC_MODEL="your-model-name"
-
-# optional: only needed when your endpoint requires authentication
-export FC_API_KEY="your-api-key"
-
-# optional: override default FastContext parameters
-export FC_MAX_TOKENS=4096
-export FC_TEMPERATURE=0.7
-```
-
-Benchmark runners may also pass separate FastContext credentials through `FASTCONTEXT_*` variables in
-`benchmark/evaluation/configs/example.env`.
-
-## Quick Start
-
-### Local Ollama endpoint
-
-The easiest local setup on macOS is to run an OpenAI-compatible endpoint with
-[Ollama](https://ollama.com/). Install Ollama, start the service, and pull a quantized FastContext model:
-
-```bash
-brew install ollama
-brew services start ollama
-ollama pull hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF
-```
-
-Configure FastContext to use the local endpoint:
-
-```bash
-export FC_BASE_URL="http://127.0.0.1:11434/v1/"
+export FC_BASE_URL="http://127.0.0.1:11434/v1"   # e.g. Ollama
 export FC_MODEL="hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF:latest"
 
-# Ollama does not require an API key.
-
-# Qwen/FastContext models can emit reasoning separately from final content.
-# Ollama accepts: none, low, medium, high, max.
-export FC_REASONING_EFFORT="none"
-
-export FC_MAX_TOKENS=1024
-export FC_TEMPERATURE=0
+# run from inside the repository you want to explore
+fastcontext -q "Where is authentication handled and where would I add a new provider?" --tui
 ```
 
-Run FastContext from the repository you want to explore:
+You get a live, collapsible view of the run:
+
+```text
+ FastContext · running…
+ Query: Where is authentication handled and where would I add a new provider?
+ ── turn 1 ──
+ ▸ 🧠 reasoning · turn 1
+ ▸ 🔧 Grep(pattern="login", output_mode="content")
+ ▸ 📄 result · Grep · 12 lines
+ ── turn 2 ──
+ ▸ 🔧 Read(path="auth/session.py")
+ ▸ 📄 result · Read · 40 lines
+ ▾ ✅ final answer
+     auth/session.py:1-40
+ ────────────────────────────────────────────────────────────
+ 📊 input 5,412 · output 318 · context 5,730
+```
+
+- Every reasoning block, tool call, and tool result is its own **collapsible row** (streamed live,
+  even while collapsed). The final answer is expanded automatically.
+- Keys: **`e`** expand all · **`c`** collapse all · **`q`** quit.
+- The bottom bar tracks cumulative **input / output** tokens and the latest **context** size.
+
+When the run finishes, the final answer is also printed to stdout, so `--tui` stays scriptable.
+
+### Local endpoints
+
+**Ollama** (easiest on macOS):
 
 ```bash
-fastcontext \
-  --query "Find the files that implement authentication and explain where to make a change" \
-  --max-turns 6 \
-  --traj .fastcontext/trajectory.jsonl
+brew install ollama && brew services start ollama
+ollama pull hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF
+
+export FC_BASE_URL="http://127.0.0.1:11434/v1"
+export FC_MODEL="hf.co/mitkox/FastContext-1.0-4B-RL-Q4_K_M-GGUF:latest"
+export FC_REASONING_EFFORT="none"   # FastContext/Qwen models emit reasoning separately
 ```
 
-Return only the machine-readable citation block:
+**llama.cpp** works the same way — just point `FC_BASE_URL` at its `/v1`. Note that with
+`--parallel N`, the *usable* window per request is the configured `--ctx-size` divided by `N`;
+`--max-tokens auto` accounts for this automatically (see below).
+
+## How a coding agent uses it (over bash)
+
+FastContext is built to be driven by another agent. The main agent shells out one command per
+question and reads the result from **stdout**:
 
 ```bash
-fastcontext \
-  --query "Locate the request validation logic" \
-  --citation
+fastcontext -q "Locate the request-validation logic and the tests that cover it" --citation
 ```
 
-Useful CLI options:
+- **`--citation`** makes stdout *only* the `<final_answer>` block — clean to parse, nothing else.
+- **stdout** carries the answer; **stderr** carries diagnostics (token auto-detection notes, budget
+  warnings). A parsing agent should read stdout and ignore stderr.
+- Exit code is `0` for a normal run. On an LLM failure the agent still exits `0` and writes
+  `LLM API call failed…` — check stdout for that marker rather than relying on the exit code.
+- Each run records a JSONL trajectory under `.fastcontext/` (override with `--traj`).
+
+A typical delegation loop the main agent runs:
+
+```bash
+ANSWER=$(fastcontext -q "$QUESTION" --citation --max-context 60000)
+# parse file:line ranges out of <final_answer>…</final_answer>, then read only those spans
+```
+
+Because exploration runs in this separate process, none of the intermediate greps and file dumps
+enter the main agent's context — only the compact citation block does.
+
+## CLI reference
+
+```text
+fastcontext -q "<query>" [options]
+```
 
 | Option | Description |
 | --- | --- |
-| `--query`, `-q` | Natural-language exploration request. |
-| `--traj`, `-t` | JSONL trajectory output path. |
-| `--max-turns` | Maximum exploration turns before forcing a final answer. |
-| `--verbose` | Print intermediate messages and runtime information. |
-| `--citation` | Return only the `<final_answer>` block when present. |
+| `--query`, `-q` | Natural-language exploration request (required). |
+| `--traj`, `-t` | JSONL trajectory output path (default: `.fastcontext/trajectory_<timestamp>.jsonl`). |
+| `--max-turns` | Maximum exploration turns before the agent is forced to answer (default `4`). |
+| `--citation` | Print only the `<final_answer>` block — the machine-readable path. |
+| `--tui` | Watch the run in the collapsible Textual TUI. |
+| `--verbose` | Print runtime info and each turn to the terminal. |
+| `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
+| `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
+| `--max-tool-output-chars` | Truncate any single tool result above this size (`0` disables). Overrides `FC_MAX_TOOL_OUTPUT_CHARS`. |
 
-## Programmatic Use
+## Sizing tokens and the context budget
+
+Two independent knobs control token limits; both matter for reliable runs:
+
+- **`--max-tokens` — the per-response completion cap** (sent to the API as `max_completion_tokens`).
+  With `auto` (the default), FastContext queries the provider's `/models` endpoint and uses the
+  model's advertised context length, recognising vLLM (`max_model_len`), llama.cpp
+  (`n_ctx_train`/`n_ctx`), TGI (`max_total_tokens`), and llama.cpp-swapper launch args
+  (`ctx-size ÷ parallel`). If nothing is detected it falls back to `4096`. An explicit integer always
+  wins, and the diagnostic is printed to **stderr** so it never pollutes a parsed answer.
+
+- **`--max-context` — the exploration budget.** As the conversation approaches this size, the agent
+  is told to produce its final answer instead of continuing to explore — which is what prevents a long
+  run from growing the prompt until the server rejects it (`exceeds the available context size`). It
+  is **off by default** (`0`), because a safe value can't be guessed blindly: a server's usable window
+  is often well below its configured one (llama.cpp `--parallel 2` halves it per slot). Set it to your
+  model's real usable window; pair it with `--max-tool-output-chars` so one large `Read` can't
+  overshoot the window in a single turn.
+
+A good default for a local llama.cpp preset serving 160k context with `--parallel 2`:
+
+```bash
+export FC_MAX_CONTEXT=70000        # ~80k usable, minus headroom for the final turn
+export FC_MAX_TOOL_OUTPUT_CHARS=16000
+```
+
+## Programmatic use
 
 ```python
 import asyncio
-
 from fastcontext.agent.agent_factory import make_fastcontext_agent
 
-
-async def main() -> None:
+async def explore(question: str) -> str:
     agent = make_fastcontext_agent(
         trajectory_file=".fastcontext/trajectory.jsonl",
-        work_dir="/path/to/repo",
+        work_dir=".",
+        max_tokens="auto",        # or an int; None reads FC_MAX_TOKENS
+        max_context=60000,        # 0 disables the budget
     )
-    answer = await agent.run(
-        prompt="Find where database migrations are defined",
-        max_turns=6,
-        citation=True,
-    )
-    print(answer)
+    return await agent.run(prompt=question, max_turns=6, citation=True)
 
-
-asyncio.run(main())
+print(asyncio.run(explore("Where is the retry logic for tool calls?")))
 ```
 
-## Reproduction
+To render a run live instead, hand the agent to the TUI:
 
-This repository contains scripts for end-to-end Mini-SWE-Agent runs and standalone exploration evaluation.
-The exact paths, model names, and credentials should be adapted to your serving environment.
+```python
+from fastcontext.tui import FastContextTUI
 
-### End-to-End SWE-Bench Runs
+app = FastContextTUI(agent=agent, prompt=question, max_turns=6, citation=True)
+app.run()
+print(app.final_answer)
+```
+
+The agent also accepts an `event_sink` callable (`agent.run(..., event_sink=fn)`) that receives
+streaming `Event` objects (turn started, token deltas, tool calls/results, usage, finished) — the same
+mechanism the TUI uses, so you can build your own live view.
+
+## Evaluation harness
+
+`eval/` contains a small harness for comparing branches on the same tasks:
 
 ```bash
-git submodule update --init --recursive
-uv build
-cp benchmark/evaluation/configs/example.env .env
+cd eval
+uv run fc-eval -c config.yaml run        # run each branch from its own worktree
+uv run fc-eval analyze                    # score trajectories
+uv run fc-eval dashboard                  # build a self-contained HTML dashboard
+uv run fc-eval all                        # run + analyze + dashboard
 ```
 
-Edit `.env` with the main-agent and FastContext endpoint credentials, then run:
+It reports, per branch, means for turns, tool calls, failed/duplicate calls, self-corrections,
+citation counts and citation quality, and tokens — with failed runs retried and excluded from the
+means so a broken run is never averaged in as a zero. See [`eval/README.md`](eval/README.md).
 
-```bash
-uv run --group benchmark python benchmark/evaluation/bench_mini_swe_agent.py \
-  --bench swebench-multilingual \
-  --agent-config prompts/gpt-multi-fc.yaml \
-  --config .env \
-  --output preds.json \
-  --logs-dir logs \
-  --workers 1
-```
+## Background
 
-For SWE-bench Pro, use the Pro prompt:
-
-```bash
-uv run --group benchmark python benchmark/evaluation/bench_mini_swe_agent.py \
-  --bench ScaleAI/SWE-bench_Pro \
-  --agent-config prompts/gpt-pro-fc.yaml \
-  --config .env \
-  --output preds-pro.json \
-  --logs-dir logs-pro
-```
-
-### Standalone Exploration
-
-The standalone runner evaluates FastContext as a repository explorer on SWE-bench-style subagent queries.
-
-```bash
-cd benchmark/swebench
-cp run.sh.sample run.sh
-# Edit run.sh with FC_BASE_URL, FC_MODEL, and FC_API_KEY if your endpoint requires authentication.
-
-uv run --group benchmark python bench_fastcontext.py \
-  --bench swebench-multilingual \
-  --experiment fastcontext-eval \
-  --prediction-file predictions.jsonl \
-  --local-mount-dir /absolute/path/to/output \
-  --num-threads 1
-```
-
-After extracting the final FastContext responses into a JSONL file with `instance_id` and `finial_response`
-fields, score citation quality from the repository root:
-
-```bash
-uv run --group benchmark python benchmark/evaluation/run_score.py \
-  swebench-multilingual \
-  result_finial_response.jsonl
-```
-
-## Training and Serving
-
-The `training/` directory contains scripts used for the SFT and RL experiments described in the paper.
-These scripts assume a research training environment with external model checkpoints, datasets, and cluster
-settings; treat paths and launcher options as examples to adapt.
-
-```text
-training/
-  fastcontext-sft/     Supervised fine-tuning scripts and data utilities
-  fastcontext-rl/      Reinforcement-learning scripts and reward utilities
-```
-
-The `serving/` directory contains example manifests and API checks for serving FastContext-compatible
-models behind an OpenAI-compatible endpoint.
-
-## Repository Layout
-
-```text
-src/fastcontext/
-  cli.py                         Command-line entry point
-  agent/
-    agent.py                     Agent loop
-    agent_factory.py             Default FastContext agent construction
-    context.py                   Conversation and trajectory storage
-    llm.py                       OpenAI-compatible LLM wrapper
-    system.md                    Explorer system prompt
-    tool/
-      read.py                    Read tool
-      glob.py                    Glob tool
-      grep.py                    Grep tool
-      tool.py                    Tool base classes and ToolSet
-
-benchmark/
-  environment/                   Docker environment helpers
-  evaluation/                    End-to-end Mini-SWE-Agent runners and scoring utilities
-  swebench/                      SWE-bench-style standalone exploration runner
-
-prompts/                         Mini-SWE-Agent prompt configs with FastContext integration
-training/                        SFT and RL training scripts
-serving/                         Example serving manifests and API checks
-tests/                           Unit and integration-style tests
-figures/                         README and paper figures
-```
-
-## Development
-
-Run linting:
-
-```bash
-uv run ruff check .
-```
-
-Run tests:
-
-```bash
-uv run pytest -q
-```
-
-Build the package:
-
-```bash
-uv build
-```
-
-## Notes
-
-- FastContext is intended for repository exploration, not code modification.
-- Tool outputs are capped to keep interactions responsive.
-- The default CLI records trajectories under `.fastcontext/` unless `--traj` is provided.
-- For best results, write specific exploration queries that name the behavior, subsystem, error, or files you are trying to locate.
-
-## Citation
-
-If you find FastContext useful, please cite:
+FastContext originates from research on training efficient repository-exploration models (4B–30B) with
+supervised fine-tuning and task-grounded RL, delegating broad exploration out of the main coding
+agent's trajectory to improve the score-per-token tradeoff. This fork keeps that exploration contract
+and hardens the surrounding harness for day-to-day use.
 
 ```bibtex
 @misc{zhang2026fastcontexttrainingefficientrepository,
@@ -356,8 +308,3 @@ If you find FastContext useful, please cite:
       url={https://arxiv.org/abs/2606.14066},
 }
 ```
-
-## Acknowledgements
-
-FastContext builds on open research infrastructure and benchmarks for coding agents, including SWE-bench,
-SWE-bench Multilingual, SWE-bench Pro, SWE-QA, Mini-SWE-Agent, and open model / serving ecosystems.
