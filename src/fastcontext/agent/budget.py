@@ -54,15 +54,17 @@ _RESERVE_SLACK_TOKENS = 2048
 # the cap was protecting, and any range it does not page back in is simply lost to the answer.
 #
 # Charging tokens directly makes the reserve exact, which buys back enough window to raise the real
-# allowance instead of trading it away: 8k tokens passes ~24k chars of ASCII source per turn (half
-# again the old 16k-char cap) while reserving 8k tokens LESS. Both ends improve, which is why this is
-# not a tuning choice between reading and exploring.
+# allowance instead of trading it away: 12k tokens passes ~36k chars of ASCII source per turn, more
+# than twice the old 16k-char cap, while STILL reserving less than it did (22,315 vs 26,315) and
+# leaving more window to explore with (49,685 vs 45,685). Both ends improve, which is why this is not
+# a tuning choice between reading and exploring.
 #
-# The size is set by what a turn must survive, not by taste: at the heaviest per-turn burn observed
-# in the eval (~4.1k tokens/turn) the old cap's reserve left room for only ~11 turns -- under the
-# default of 12, so the budget, not the turn cap, was ending heavy runs. 8k leaves room for ~13.
+# The size is the largest that keeps both of those true. Past ~12k the reserve grows faster than the
+# allowance is worth: at 16k the explorable window is back to the old 45,685, and at the heaviest
+# per-turn burn seen in the eval it would leave room for only ~11 turns -- under the default of 12,
+# so the budget rather than the turn cap would end heavy runs, which is the old failure returning.
 # Read's own 2000-line x 500-char ceiling would otherwise allow ~250k tokens from a single call.
-DEFAULT_MAX_TURN_OUTPUT_TOKENS = 8_000
+DEFAULT_MAX_TURN_OUTPUT_TOKENS = 12_000
 
 TRUNCATION_NOTICE = (
     "\n<system-reminder>Output truncated: it exceeded the {scope} limit of {limit} tokens. "

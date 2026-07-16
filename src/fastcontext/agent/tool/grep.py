@@ -4,6 +4,16 @@ from pathlib import Path
 from .tool import Tool
 from .utils import RG_PATH, resolve_path
 
+# Lines a Grep returns when the model does not ask for a specific `head_limit`.
+#
+# This is a runaway guard, not the real bound -- the per-turn token budget is, and it is the one
+# sized against the context reserve. The previous 100 fired on 7% of all tool results in a 12-run
+# eval, cutting greps at roughly a sixth of what the turn budget already allowed: a fixed line count
+# cannot know what a line costs, so it truncated matches the run had room for. For an agent whose job
+# is to find code, a match it is never shown may as well not exist -- and it cannot raise the limit
+# itself, it can only search again and spend another turn.
+DEFAULT_HEAD_LIMIT = 1000
+
 
 class GrepTool(Tool):
     name = "Grep"
@@ -55,7 +65,7 @@ class GrepTool(Tool):
             "head_limit": {
                 "type": "number",
                 "minimum": 0,
-                "description": 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, results are capped at the first 100 lines.',
+                "description": 'Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, results are capped at the first 1000 lines.',
             },
             "multiline": {
                 "type": "boolean",
@@ -104,7 +114,7 @@ class GrepTool(Tool):
         if not output:
             output = "No matches found"
         else:
-            limit = 100
+            limit = DEFAULT_HEAD_LIMIT
             if head_limit is not None and head_limit > 0:
                 limit = head_limit
 
