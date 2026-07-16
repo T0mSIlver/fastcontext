@@ -7,7 +7,7 @@ from fastcontext.agent.budget import (
     required_reserve,
 )
 from fastcontext.agent.config import adopt_renamed_overrides, load_settings
-from fastcontext.agent.llm import LLM, resolve_max_tokens
+from fastcontext.agent.llm import LLM, resolve_max_completion_tokens, resolve_max_context
 from fastcontext.agent.tool.tool import ToolSet
 from fastcontext.agent.tool.utils import RG_PATH
 from fastcontext.agent.utils import load_system_prompt
@@ -18,7 +18,7 @@ _OVERRIDE_KEYS = (
     "base_url",
     "api_key",
     "temperature",
-    "max_tokens",
+    "max_completion_tokens",
     "max_context",
     "max_turn_output_tokens",
     "max_result_output_tokens",
@@ -53,10 +53,17 @@ def make_fastcontext_agent(
     api_key = settings.str_("api_key", "FC_API_KEY", "API_KEY")
     base_url = settings.require("base_url", "FC_BASE_URL", "BASE_URL")
 
-    # Context window in tokens. 0 disables the budget (unbounded, the old behavior): we cannot
-    # guess it safely, because a server's usable window is often far below its configured one --
-    # llama.cpp with --parallel 2 halves it per slot.
-    max_context = settings.int_("max_context", "FC_MAX_CONTEXT", 0)
+    # The usable context window in tokens, which the provider can often tell us -- including the
+    # llama.cpp case where the configured window is shared between --parallel slots. 0 disables the
+    # budget; "auto" (the default) asks the provider and leaves it off if nothing is advertised,
+    # because a guessed window is worse than none.
+    max_context = resolve_max_context(
+        settings.raw("max_context", "FC_MAX_CONTEXT"),
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        verbose=kwargs.get("verbose", False),
+    )
     max_turn_output_tokens = settings.int_(
         "max_turn_output_tokens", "FC_MAX_TURN_OUTPUT_TOKENS", DEFAULT_MAX_TURN_OUTPUT_TOKENS
     )
@@ -65,14 +72,11 @@ def make_fastcontext_agent(
     max_result_output_tokens = settings.int_("max_result_output_tokens", "FC_MAX_RESULT_OUTPUT_TOKENS", 0)
     max_citations = settings.int_("max_citations", "FC_MAX_CITATIONS", DEFAULT_MAX_CITATIONS)
 
-    # max_tokens (the per-response completion cap): the resolved source (override > FC_MAX_TOKENS env
-    # > config file) feeds provider auto-detection. "auto" (or unset) triggers a lookup of the
-    # model's context length from the provider's /models endpoint; otherwise an integer is used.
-    max_tokens = resolve_max_tokens(
-        settings.raw("max_tokens", "FC_MAX_TOKENS"),
-        base_url=base_url,
-        api_key=api_key,
-        model=model,
+    # How long ONE response may be. Never detected from the provider: what a provider advertises is
+    # the context WINDOW (see max_context above), and feeding that in here makes the reserve -- which
+    # is 2 x this -- exceed the window, so the agent finalizes before its first turn.
+    max_completion_tokens = resolve_max_completion_tokens(
+        settings.raw("max_completion_tokens", "FC_MAX_COMPLETION_TOKENS"),
         verbose=kwargs.get("verbose", False),
     )
     temperature = settings.float_("temperature", "FC_TEMPERATURE", 0.7)
@@ -81,7 +85,7 @@ def make_fastcontext_agent(
         model=model,
         api_key=api_key,
         base_url=base_url,
-        max_tokens=max_tokens,
+        max_tokens=max_completion_tokens,
         temperature=temperature,
         reasoning_effort=settings.str_("reasoning_effort", "FC_REASONING_EFFORT"),
     )
@@ -90,7 +94,7 @@ def make_fastcontext_agent(
     # full turn of tool output plus the completion -- otherwise the agent can cross the limit and
     # find that even the final-answer request no longer fits.
     reserve = settings.int_("context_reserve", "FC_CONTEXT_RESERVE", 0) or required_reserve(
-        max_turn_output_tokens, max_tokens
+        max_turn_output_tokens, max_completion_tokens
     )
 
     from fastcontext.agent.tool.glob import GlobTool
