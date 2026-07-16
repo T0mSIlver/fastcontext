@@ -31,14 +31,19 @@ Prefer it over manual grep/glob/read chains whenever the answer spans more than 
 
 ```bash
 # Machine-readable: prints ONLY the <final_answer> citation block to stdout
-fastcontext -q "<specific, detailed question>" --citation
+fastcontext -q "<specific, detailed question>" --citation --max-turns 12
 
-# Harder traces / architecture: allow more exploration turns (default 4)
-fastcontext -q "<complex question>" --citation --max-turns 8
+# Hard architecture traces across many modules: 16 is the practical ceiling
+fastcontext -q "<complex question>" --citation --max-turns 16
 
 # Drop --citation to also get a prose explanation (more context, some noise)
 fastcontext -q "<question>"
 ```
+
+**Pass `--max-turns 12`.** The CLI default is `4`, which cuts most real explorations short: measured
+against six repos, the runs that finished on their own needed 5–14 turns (median ~9), so both `4` and
+`8` truncate over half of them. A turn cap above what a question needs costs nothing — a simple lookup
+converges and stops on its own, well before the cap.
 
 Output on **stdout**:
 
@@ -50,6 +55,38 @@ src/app/service.py:10-33 (handler that calls it)
 ```
 
 Parse the `path:line-range` entries and **read only those spans** — that's the point.
+
+## Why 12, and when it changes
+
+There is no universally right turn count — the real limit is **context, not turns**. The agent stops
+exploring once the conversation approaches its context budget, so the number of turns you can afford
+is roughly:
+
+```
+usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
+    reserve ≈ max_tool_output_chars + 2 × max_tokens + slack
+```
+
+Three things move that number, and raising `--max-turns` alone does nothing if the first one is small:
+
+- **The model's usable context** (`--max-context` / `FC_MAX_CONTEXT`). Note a server's *usable* window
+  is often well below its configured one — llama.cpp `--parallel 2` halves it per slot.
+- **The reserve**, which is not small: it holds back a full turn of tool output plus the completion so
+  the final answer is still sendable. On the reference setup it claims ~26k of a 72k budget, leaving
+  ~46k to actually explore with.
+- **Tokens burned per turn**, driven mostly by `--max-tool-output-chars` (the per-turn cap on tool
+  output) and by how much the question makes the model *read* versus *grep*. Repo size matters far
+  less than question shape.
+
+On the reference setup (~46k explorable, ~2k tokens/turn typical, ~3.4k on a heavy trace) that works
+out to ~13 turns before the budget intervenes — hence 12 as a default that fits with room to spare.
+**Halve `max_context` and you roughly halve the usable turns**, so if your endpoint is smaller, scale
+the number down rather than copying 12.
+
+Going over the limit is safe but pointless: the agent finalizes early and still returns a good answer
+(observed on the heaviest trace in the eval) — **provided `max_context` is set**. It defaults to `0`
+(budget disabled), and with no budget a long run instead grows the prompt until the server rejects it
+and the run dies with no answer at all.
 
 ## Notes
 
