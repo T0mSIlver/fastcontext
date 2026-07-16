@@ -7,6 +7,10 @@ from pathlib import Path
 
 from fastcontext.agent.agent import AgentRunError
 from fastcontext.agent.agent_factory import make_fastcontext_agent
+from fastcontext.agent.config import warn_renamed_flag
+
+# Kept as an alias of --max-turn-output-chars; it never bounded a single tool's output.
+_DEPRECATED_TURN_FLAG = "--max-tool-output-chars"
 
 
 def _run_init(args) -> int:
@@ -84,23 +88,30 @@ def main():
         ),
     )
     parser.add_argument(
-        "--max-tool-output-chars",
+        "--max-turn-output-chars",
+        # Deprecated alias: the old name said "tool" but bounded a whole turn, which is the confusion
+        # the rename removes. Still accepted so existing invocations keep working.
+        _DEPRECATED_TURN_FLAG,
+        dest="max_turn_output_chars",
         type=int,
         default=None,
+        metavar="N",
         help=(
             "total characters of tool output ONE TURN may add, across all of its tool calls "
             "(0 disables). Guards against a turn exhausting the whole window; the context reserve is "
-            "sized against it. Overrides FC_MAX_TOOL_OUTPUT_CHARS."
+            "sized against it. Overrides FC_MAX_TURN_OUTPUT_CHARS."
         ),
     )
     parser.add_argument(
-        "--max-tool-result-chars",
+        "--max-result-output-chars",
+        dest="max_result_output_chars",
         type=int,
         default=None,
+        metavar="N",
         help=(
             "truncate a SINGLE tool result above this many characters (0 disables, the default). "
             "The turn budget is spent in call order, so one huge result can starve the later calls "
-            "of that turn; this caps each result first. Overrides FC_MAX_TOOL_RESULT_CHARS."
+            "of that turn; this caps each result first. Overrides FC_MAX_RESULT_OUTPUT_CHARS."
         ),
     )
     parser.add_argument(
@@ -130,14 +141,19 @@ def main():
     if args.command == "init":
         raise SystemExit(_run_init(args))
 
+    # argparse resolves an option alias silently, so the old flag would otherwise be the one spelling
+    # that moves a cap without saying so -- the env var and config key both announce themselves.
+    if any(a == _DEPRECATED_TURN_FLAG or a.startswith(f"{_DEPRECATED_TURN_FLAG}=") for a in sys.argv[1:]):
+        warn_renamed_flag(_DEPRECATED_TURN_FLAG, "--max-turn-output-chars")
+
     work_dir = os.getcwd()
     agent = make_fastcontext_agent(
         trajectory_file=args.traj,
         work_dir=work_dir,
         max_tokens=args.max_tokens,
         max_context=args.max_context,
-        max_tool_output_chars=args.max_tool_output_chars,
-        max_tool_result_chars=args.max_tool_result_chars,
+        max_turn_output_chars=args.max_turn_output_chars,
+        max_result_output_chars=args.max_result_output_chars,
         max_citations=args.max_citations,
         verbose=args.verbose,
         config_path=args.config,

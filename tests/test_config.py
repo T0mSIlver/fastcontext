@@ -4,6 +4,7 @@ import pytest
 
 import tomllib
 
+from fastcontext.agent import config
 from fastcontext.agent.config import (
     load_settings,
     project_config_path,
@@ -23,6 +24,11 @@ _ENV_VARS = [
     "API_KEY",
     "FC_MAX_TOKENS",
     "FC_MAX_CONTEXT",
+    "FC_MAX_TURN_OUTPUT_CHARS",
+    "FC_MAX_RESULT_OUTPUT_CHARS",
+    "FC_MAX_TOOL_OUTPUT_CHARS",  # renamed -> FC_MAX_TURN_OUTPUT_CHARS
+    "FC_MAX_CITATIONS",
+    "FC_CONTEXT_RESERVE",
     "FC_TEMPERATURE",
     "FC_REASONING_EFFORT",
     "FC_CONFIG",
@@ -36,6 +42,8 @@ def _clean_env(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     # Point XDG at an empty dir so a real user config never bleeds in.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    # The rename warning fires once per process; clear it so each case sees its own.
+    config._WARNED.clear()
 
 
 def _write(path, text):
@@ -228,3 +236,93 @@ def test_write_starter_config_is_owner_only(tmp_path):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# --- renamed settings --------------------------------------------------------
+#
+# `max_tool_output_chars` said "tool" but bounded a whole TURN. It is honored under its old name
+# rather than ignored: it is the cap the context reserve is sized against, so silently dropping it
+# would move that cap without telling anyone.
+
+
+def _turn_chars(settings):
+    return settings.int_("max_turn_output_chars", "FC_MAX_TURN_OUTPUT_CHARS", 16000)
+
+
+def test_renamed_config_key_is_honored_and_warns(tmp_path, capsys):
+    path = _write(tmp_path / "c.toml", "max_tool_output_chars = 5000\n")
+    settings = load_settings(str(tmp_path), config_path=str(path))
+    assert _turn_chars(settings) == 5000
+    err = capsys.readouterr().err
+    assert "max_tool_output_chars" in err and "max_turn_output_chars" in err
+
+
+def test_renamed_env_var_is_honored_and_warns(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert _turn_chars(settings) == 7000
+    err = capsys.readouterr().err
+    assert "FC_MAX_TOOL_OUTPUT_CHARS" in err and "FC_MAX_TURN_OUTPUT_CHARS" in err
+
+
+def test_new_name_wins_over_the_old_one(monkeypatch, tmp_path):
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+    monkeypatch.setenv("FC_MAX_TURN_OUTPUT_CHARS", "9000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert _turn_chars(settings) == 9000
+
+
+def test_new_name_in_a_file_beats_the_old_env_var(monkeypatch, tmp_path):
+    """Adopting the new name anywhere overrides a stale old one rather than fighting it."""
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+    path = _write(tmp_path / "c.toml", "max_turn_output_chars = 9000\n")
+    settings = load_settings(str(tmp_path), config_path=str(path))
+    assert _turn_chars(settings) == 9000
+
+
+def test_no_warning_when_only_the_new_name_is_used(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("FC_MAX_TURN_OUTPUT_CHARS", "9000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert _turn_chars(settings) == 9000
+    assert "deprecated" not in capsys.readouterr().err
+
+
+def test_rename_warning_is_emitted_once(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    _turn_chars(settings)
+    _turn_chars(settings)
+    assert capsys.readouterr().err.count("deprecated") == 1
+
+
+def test_starter_config_offers_the_new_names_only():
+    rendered = render_starter_config(env={})
+    assert "max_turn_output_chars" in rendered
+    assert "max_result_output_chars" in rendered
+    assert "max_tool_output_chars" not in rendered
+
+
+def test_renamed_kwarg_is_adopted_not_swallowed(capsys):
+    """A programmatic caller passing the old name must not silently land on the default cap.
+
+    `make_fastcontext_agent(max_tool_output_chars=...)` would otherwise fall into **kwargs and be
+    dropped -- the same "moves the cap without telling anyone" failure the env/file shim prevents.
+    """
+    overrides = config.adopt_renamed_overrides(
+        {"max_turn_output_chars": None}, {"max_tool_output_chars": 5000}
+    )
+    assert overrides["max_turn_output_chars"] == 5000
+    assert "deprecated" in capsys.readouterr().err
+
+
+def test_explicit_new_kwarg_beats_the_renamed_one(capsys):
+    overrides = config.adopt_renamed_overrides(
+        {"max_turn_output_chars": 9000}, {"max_tool_output_chars": 5000}
+    )
+    assert overrides["max_turn_output_chars"] == 9000
+
+
+def test_adopt_renamed_overrides_is_a_noop_without_the_old_name(capsys):
+    overrides = config.adopt_renamed_overrides({"max_turn_output_chars": None}, {"other": 1})
+    assert overrides == {"max_turn_output_chars": None}
+    assert "deprecated" not in capsys.readouterr().err
