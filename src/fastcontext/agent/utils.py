@@ -100,8 +100,13 @@ def format_citations(
     if validate:
         validated_citations = []
         for c in citations:
-            # if not file or not existing, skip this citation
-            if not os.path.isfile(c["path"]):
+            # if not file or not existing, skip this citation. Resolve a relative path against the
+            # working directory (as the observed-lines side does) rather than the process cwd, or a
+            # relative citation would be checked against the wrong directory and silently dropped.
+            path = c["path"]
+            if cwd and not os.path.isabs(path):
+                path = os.path.join(cwd, path)
+            if not os.path.isfile(path):
                 continue
             validated_citations.append(c)
 
