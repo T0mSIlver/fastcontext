@@ -113,6 +113,7 @@ flags. Only the model and endpoint are required.
 | `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
 | `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
 | `FC_MAX_TOOL_OUTPUT_CHARS` | — | `16000` | Truncate a single tool result above this many characters (`0` disables). |
+| `FC_MAX_CITATIONS` | — | `25` | Cap the number of citations in the final answer; a safety bound on a runaway list (`0` disables). |
 | `FC_CONTEXT_RESERVE` | — | auto | Tokens held back from the budget for one turn of tool output + the completion. |
 | `FC_REASONING_EFFORT` | — | — | Passed through to servers that support it (`none`/`low`/`medium`/`high`/`max`). |
 
@@ -140,6 +141,7 @@ api_key  = "dummy"                 # omit if your endpoint needs no auth
 max_tokens = "auto"                # int, or "auto" to detect from the provider
 max_context = 70000                # usable window; enables the context budget
 max_tool_output_chars = 16000
+max_citations = 25                 # safety cap on the final answer's citation count (0 disables)
 reasoning_effort = "none"
 temperature = 0.0
 ```
@@ -258,6 +260,7 @@ fastcontext -q "<query>" [options]
 | `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
 | `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
 | `--max-tool-output-chars` | Truncate any single tool result above this size (`0` disables). Overrides `FC_MAX_TOOL_OUTPUT_CHARS`. |
+| `--max-citations` | Cap the number of citations in the final answer; a safety bound (`0` disables). Overrides `FC_MAX_CITATIONS` (default `25`). |
 | `--config` | Path to a TOML config file. Overrides `FC_CONFIG` and config-file discovery. |
 
 ## Sizing tokens and the context budget

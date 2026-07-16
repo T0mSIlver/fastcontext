@@ -93,6 +93,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--max-citations",
+        type=int,
+        default=None,
+        help=(
+            "cap the number of citations in the final answer (0 disables). A safety bound on a "
+            "runaway/hallucinated list; the model's order is kept. Overrides FC_MAX_CITATIONS "
+            "(default 25)."
+        ),
+    )
+    parser.add_argument(
         "--config",
         type=str,
         default=None,
@@ -116,6 +126,7 @@ def main():
         max_tokens=args.max_tokens,
         max_context=args.max_context,
         max_tool_output_chars=args.max_tool_output_chars,
+        max_citations=args.max_citations,
         verbose=args.verbose,
         config_path=args.config,
     )
