@@ -72,9 +72,10 @@ Everything below is in this fork on top of the original explorer:
   tells the agent to answer *now* instead of exploring its way into a prompt the server rejects. A
   per-turn output cap stops one giant `Read` from blowing the window in a single turn; a per-result
   cap stops it starving the other calls of the same turn.
-- 🔎 **Provider token auto-detection** (`--max-tokens auto`) — queries the provider's `/models`
-  endpoint to discover the model's real context length (including llama.cpp swapper launch args,
-  where usable context is `ctx-size ÷ parallel`) instead of guessing a hardcoded default.
+- 🔎 **Provider window auto-detection** (`--max-context auto`) — queries the provider's `/models`
+  endpoint to discover the model's real context window (including llama.cpp swapper launch args,
+  where usable context is `ctx-size ÷ parallel`) and turns the context budget on with it, instead of
+  leaving it off because the value could not be guessed.
 - 📌 **Citation validation** — line ranges the model never actually opened during exploration are
   dropped from the answer, so a hallucinated citation can't slip through.
 - 🧭 **Robust path handling** — mangled or relative tool-call paths are resolved against the working
@@ -111,8 +112,8 @@ flags. Only the model and endpoint are required.
 | `FC_BASE_URL` | ✅ | — | OpenAI-compatible base URL, e.g. `http://127.0.0.1:11434/v1` (alias: `BASE_URL`). |
 | `FC_API_KEY` | — | — | Sent as a bearer token when the endpoint requires auth (alias: `API_KEY`). |
 | `FC_TEMPERATURE` | — | `0.7` | Sampling temperature. |
-| `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
-| `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
+| `FC_MAX_COMPLETION_TOKENS` | — | `4096` | How long **one response** may be. Not the model's window — see `FC_MAX_CONTEXT`. (Was `FC_MAX_TOKENS`, still honored with a warning.) |
+| `FC_MAX_CONTEXT` | — | `auto` | Usable context window in tokens; the budget finalizes the run before it overruns. An integer, `0` to disable, or `auto` to ask the provider (off if it advertises nothing). |
 | `FC_MAX_TURN_OUTPUT_TOKENS` | — | `12000` | Total **tokens** of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. Supersedes the `*_CHARS` names, which are converted with a warning. |
 | `FC_MAX_RESULT_OUTPUT_TOKENS` | — | `0` (off) | Truncate a **single** tool result above this many **tokens** (`0` disables). Stops one big result eating the whole turn budget. |
 | `FC_MAX_CITATIONS` | — | `25` | Cap the number of citations in the final answer; a safety bound on a runaway list (`0` disables). |
@@ -140,8 +141,8 @@ model    = "fastcontext"
 api_key  = "dummy"                 # omit if your endpoint needs no auth
 
 # optional tuning
-max_tokens = "auto"                # int, or "auto" to detect from the provider
-max_context = 70000                # usable window; enables the context budget
+max_completion_tokens = 4096        # how long ONE response may be (not the window)
+max_context = "auto"                # window; int, 0 to disable, or "auto" to ask the provider
 max_turn_output_tokens = 12000      # per-TURN total (tokens), across all of a turn's tool calls
 max_result_output_tokens = 0        # per-RESULT cap (tokens); 0 = off
 max_citations = 25                  # safety cap on the final answer's citation count (0 disables)
@@ -218,7 +219,7 @@ export FC_REASONING_EFFORT="none"   # FastContext/Qwen models emit reasoning sep
 
 **llama.cpp** works the same way — just point `FC_BASE_URL` at its `/v1`. Note that with
 `--parallel N`, the *usable* window per request is the configured `--ctx-size` divided by `N`;
-`--max-tokens auto` accounts for this automatically (see below).
+`--max-context auto` accounts for this automatically (see below).
 
 ## How a coding agent uses it (over bash)
 
@@ -260,8 +261,8 @@ fastcontext -q "<query>" [options]
 | `--citation` | Print only the `<final_answer>` block — the machine-readable path. |
 | `--tui` | Watch the run in the collapsible Textual TUI. |
 | `--verbose` | Print runtime info and each turn to the terminal. |
-| `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
-| `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
+| `--max-completion-tokens` | How long **one response** may be, in tokens. Not the model's window — see `--max-context`. Overrides `FC_MAX_COMPLETION_TOKENS`. (Deprecated alias: `--max-tokens`.) |
+| `--max-context` | Usable context window in tokens: an integer, `0` to disable, or `auto` (default) to ask the provider. Overrides `FC_MAX_CONTEXT`. |
 | `--max-turn-output-tokens` | Total tool output, in **tokens**, one **turn** may add across all its calls (`0` disables). Overrides `FC_MAX_TURN_OUTPUT_TOKENS`. |
 | `--max-result-output-tokens` | Truncate a **single** tool result above this many **tokens** (`0` disables, the default). Overrides `FC_MAX_RESULT_OUTPUT_TOKENS`. |
 | `--max-citations` | Cap the number of citations in the final answer; a safety bound (`0` disables). Overrides `FC_MAX_CITATIONS` (default `25`). |
@@ -271,20 +272,27 @@ fastcontext -q "<query>" [options]
 
 Two independent knobs control token limits; both matter for reliable runs:
 
-- **`--max-tokens` — the per-response completion cap** (sent to the API as `max_completion_tokens`).
-  With `auto` (the default), FastContext queries the provider's `/models` endpoint and uses the
-  model's advertised context length, recognising vLLM (`max_model_len`), llama.cpp
-  (`n_ctx_train`/`n_ctx`), TGI (`max_total_tokens`), and llama.cpp-swapper launch args
-  (`ctx-size ÷ parallel`). If nothing is detected it falls back to `4096`. An explicit integer always
-  wins, and the diagnostic is printed to **stderr** so it never pollutes a parsed answer.
+- **`--max-completion-tokens` — how long one response may be** (sent to the API as
+  `max_completion_tokens`). Default `4096`. FastContext's responses are tool calls and a final
+  answer, both short, so this rarely needs changing.
+
+  It is **never detected from the provider**, and that is the point. What a provider advertises is
+  its context *window*; feeding that in here is not merely imprecise, it disables the run — the
+  reserve is `2 x` this value, so a window-sized cap makes the reserve exceed the window and the
+  agent finalizes before its first turn, answering with no exploration at all. The window belongs in
+  `--max-context`, below. Was `--max-tokens` / `FC_MAX_TOKENS`, whose name named neither which tokens
+  nor whose; the old name still works and warns.
 
 - **`--max-context` — the exploration budget.** As the conversation approaches this size, the agent
   is told to produce its final answer instead of continuing to explore — which is what prevents a long
-  run from growing the prompt until the server rejects it (`exceeds the available context size`). It
-  is **off by default** (`0`), because a safe value can't be guessed blindly: a server's usable window
-  is often well below its configured one (llama.cpp `--parallel 2` halves it per slot). Set it to your
-  model's real usable window; pair it with `--max-turn-output-tokens` so one large `Read` can't
-  overshoot the window in a single turn.
+  run from growing the prompt until the server rejects it (`exceeds the available context size`).
+
+  `auto` (the default) asks the provider's `/models` endpoint, recognising vLLM (`max_model_len`),
+  llama.cpp (`n_ctx_train`/`n_ctx`), TGI (`max_total_tokens`), and llama.cpp-swapper launch args
+  (`ctx-size ÷ parallel`, so a `--parallel 2` server reports its real per-slot window). If nothing is
+  advertised the budget stays **off** rather than guessing: a wrong window is worse than none — too
+  high and the run dies mid-flight, too low and it finalizes early. Pass an integer to set it
+  yourself, or `0` to disable.
 
 - **`--max-turn-output-tokens` — the per-turn tool-output budget.** The total a single turn may add
   across *all* of its tool calls, not per result. This is the one the reserve is sized against, so it
@@ -310,7 +318,7 @@ Two independent knobs control token limits; both matter for reliable runs:
 A good default for a local llama.cpp preset serving 160k context with `--parallel 2`:
 
 ```bash
-export FC_MAX_CONTEXT=70000              # ~80k usable, minus headroom for the final turn
+export FC_MAX_CONTEXT=70000              # or leave unset: auto detects ~80k usable from the server
 export FC_MAX_TURN_OUTPUT_TOKENS=12000    # tokens per turn, across all its tool calls
 # export FC_MAX_RESULT_OUTPUT_TOKENS=2500 # optional: keep one big Read from starving the same turn's greps
 ```
@@ -323,7 +331,7 @@ budget rather than from a fixed rule:
 
 ```
 usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
-    reserve  =  required_reserve(max_turn_output_tokens, max_tokens)
+    reserve  =  required_reserve(max_turn_output_tokens, max_completion_tokens)
 ```
 
 The reserve is substantial — it holds back a full turn of tool output plus the completion so the
@@ -365,7 +373,7 @@ async def explore(question: str) -> str:
     agent = make_fastcontext_agent(
         trajectory_file=".fastcontext/trajectory.jsonl",
         work_dir=".",
-        max_tokens="auto",        # or an int; None reads FC_MAX_TOKENS
+        max_completion_tokens=4096,   # how long one response may be; None reads the config
         max_context=60000,        # 0 disables the budget
     )
     return await agent.run(prompt=question, max_turns=6, citation=True)

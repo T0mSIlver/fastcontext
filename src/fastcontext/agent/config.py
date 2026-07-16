@@ -49,7 +49,7 @@ _ENDPOINT_KEYS = (
     ("api_key", "FC_API_KEY", "API_KEY"),
 )
 _TUNING_KEYS = (
-    ("max_tokens", "FC_MAX_TOKENS", None),
+    ("max_completion_tokens", "FC_MAX_COMPLETION_TOKENS", None),
     ("max_context", "FC_MAX_CONTEXT", None),
     ("max_turn_output_tokens", "FC_MAX_TURN_OUTPUT_TOKENS", None),
     ("max_result_output_tokens", "FC_MAX_RESULT_OUTPUT_TOKENS", None),
@@ -86,12 +86,17 @@ def _chars_to_tokens(value: Any) -> int | None:
 
 
 _RENAMED_KEYS: dict[str, tuple[str, Any]] = {
+    # max_tokens named neither which tokens nor whose: it is the per-response completion cap, it sat
+    # beside three other max_*_tokens settings, and it is one letter from --max-turns. Same unit, so
+    # a plain alias rather than a conversion.
+    "max_tokens": ("max_completion_tokens", None),
     "max_tool_output_chars": ("max_turn_output_tokens", _chars_to_tokens),
     "max_turn_output_chars": ("max_turn_output_tokens", _chars_to_tokens),
     "max_tool_result_chars": ("max_result_output_tokens", _chars_to_tokens),
     "max_result_output_chars": ("max_result_output_tokens", _chars_to_tokens),
 }
 _RENAMED_ENV: dict[str, tuple[str, Any]] = {
+    "FC_MAX_TOKENS": ("FC_MAX_COMPLETION_TOKENS", None),
     "FC_MAX_TOOL_OUTPUT_CHARS": ("FC_MAX_TURN_OUTPUT_TOKENS", _chars_to_tokens),
     "FC_MAX_TURN_OUTPUT_CHARS": ("FC_MAX_TURN_OUTPUT_TOKENS", _chars_to_tokens),
     "FC_MAX_TOOL_RESULT_CHARS": ("FC_MAX_RESULT_OUTPUT_TOKENS", _chars_to_tokens),

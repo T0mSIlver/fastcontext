@@ -22,7 +22,8 @@ _ENV_VARS = [
     "BASE_URL",
     "FC_API_KEY",
     "API_KEY",
-    "FC_MAX_TOKENS",
+    "FC_MAX_COMPLETION_TOKENS",
+    "FC_MAX_TOKENS",  # superseded -> FC_MAX_COMPLETION_TOKENS
     "FC_MAX_CONTEXT",
     "FC_MAX_TURN_OUTPUT_TOKENS",
     "FC_MAX_RESULT_OUTPUT_TOKENS",
@@ -190,7 +191,7 @@ def test_starter_config_bakes_in_current_env():
         "FC_BASE_URL": "http://host:8080/v1",
         "FC_MODEL": "fastcontext",
         "FC_API_KEY": "secret",
-        "FC_MAX_TOKENS": "auto",
+        "FC_MAX_COMPLETION_TOKENS": "2048",
         "FC_MAX_CONTEXT": "70000",
         "FC_REASONING_EFFORT": "none",
     }
@@ -198,8 +199,8 @@ def test_starter_config_bakes_in_current_env():
     assert data["base_url"] == "http://host:8080/v1"
     assert data["model"] == "fastcontext"
     assert data["api_key"] == "secret"
-    assert data["max_tokens"] == "auto"  # non-numeric -> quoted string
-    assert data["max_context"] == 70000  # numeric -> bare int
+    assert data["max_completion_tokens"] == 2048  # numeric -> bare int
+    assert data["max_context"] == 70000
     assert data["reasoning_effort"] == "none"
 
 
@@ -370,3 +371,13 @@ def test_a_small_cap_never_rounds_down_onto_the_sentinel(tmp_path):
     path = _write(tmp_path / "c.toml", "max_tool_output_chars = 2\n")
     settings = load_settings(str(tmp_path), config_path=str(path))
     assert _turn_tokens(settings) == 1
+
+
+def test_superseded_max_tokens_name_is_aliased(monkeypatch, tmp_path, capsys):
+    """Same quantity, so a plain alias -- no conversion, unlike the *_CHARS caps."""
+    monkeypatch.setenv("FC_MAX_TOKENS", "2048")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert settings.int_("max_completion_tokens", "FC_MAX_COMPLETION_TOKENS", 4096) == 2048
+    err = capsys.readouterr().err
+    assert "FC_MAX_TOKENS" in err and "FC_MAX_COMPLETION_TOKENS" in err
+    assert "TOKENS, not characters" not in err, "no unit change here; do not claim one"
