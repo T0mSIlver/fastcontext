@@ -256,7 +256,7 @@ fastcontext -q "<query>" [options]
 | --- | --- |
 | `--query`, `-q` | Natural-language exploration request (required). |
 | `--traj`, `-t` | JSONL trajectory output path (default: `.fastcontext/trajectory_<timestamp>.jsonl`). |
-| `--max-turns` | Maximum exploration turns before the agent is forced to answer (default `4`; see [Choosing `--max-turns`](#choosing---max-turns) — `12` suits most real explorations). |
+| `--max-turns` | Maximum exploration turns before the agent is forced to answer (default `12`; see [Choosing `--max-turns`](#choosing---max-turns)). |
 | `--citation` | Print only the `<final_answer>` block — the machine-readable path. |
 | `--tui` | Watch the run in the collapsible Textual TUI. |
 | `--verbose` | Print runtime info and each turn to the terminal. |

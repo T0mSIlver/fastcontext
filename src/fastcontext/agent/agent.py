@@ -230,7 +230,7 @@ class Agent:
     async def run(
         self,
         prompt: str,
-        max_turns: int = 4,
+        max_turns: int = 12,
         verbose: bool = False,
         citation: bool = False,
         event_sink: EventSink | None = None,
