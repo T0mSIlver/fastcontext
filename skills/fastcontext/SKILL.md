@@ -31,7 +31,7 @@ Prefer it over manual grep/glob/read chains whenever the answer spans more than 
 
 ```bash
 # Machine-readable: prints ONLY the <final_answer> citation block to stdout
-fastcontext -q "<specific, detailed question>" --citation --max-turns 12
+fastcontext -q "<specific, detailed question>" --citation
 
 # Hard architecture traces across many modules: 16 is the practical ceiling
 fastcontext -q "<complex question>" --citation --max-turns 16
@@ -40,10 +40,10 @@ fastcontext -q "<complex question>" --citation --max-turns 16
 fastcontext -q "<question>"
 ```
 
-**Pass `--max-turns 12`.** The CLI default is `4`, which cuts most real explorations short: measured
-against six repos, the runs that finished on their own needed 5–14 turns (median ~9), so both `4` and
-`8` truncate over half of them. A turn cap above what a question needs costs nothing — a simple lookup
-converges and stops on its own, well before the cap.
+**You do not need to pass `--max-turns`.** It defaults to `12`, which fits real explorations: measured
+against six repos, the runs that finished on their own needed 5–14 turns (median ~9). A turn cap above
+what a question needs costs nothing — a simple lookup converges and stops on its own, well before the
+cap — so raise it only for a large exploration.
 
 Output on **stdout**:
 
