@@ -31,6 +31,7 @@ import os
 import stat
 import sys
 from collections.abc import Mapping
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -71,9 +72,17 @@ _ASCII_CHARS_PER_TOKEN = 3.0
 
 def _chars_to_tokens(value: Any) -> int | None:
     try:
-        return max(1, round(int(str(value).strip()) / _ASCII_CHARS_PER_TOKEN))
+        chars = int(str(value).strip())
     except (TypeError, ValueError):
         return None
+    if chars <= 0:
+        # 0 means "no cap" for these settings, under both the old name and the new one. Scaling it
+        # would turn the documented disable value into a 1-token cap -- every tool result replaced by
+        # its own truncation notice, so the agent sees nothing at all. A sentinel is not a quantity.
+        return chars
+    # Round UP: rounding a small cap down toward 0 would land on the disable sentinel and mean the
+    # opposite of what was asked.
+    return max(1, ceil(chars / _ASCII_CHARS_PER_TOKEN))
 
 
 _RENAMED_KEYS: dict[str, tuple[str, Any]] = {

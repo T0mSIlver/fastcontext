@@ -167,10 +167,14 @@ def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
 
     notice = TRUNCATION_NOTICE.format(limit=limit, scope=_TURN_SCOPE)
     notice_tokens = estimate_tokens(notice)
-    # Every result may need a truncation notice, and the notices are not free. Set the payload
-    # allowance aside for them up front so the turn's total stays under `limit` for ANY number of
-    # tool calls -- otherwise a turn with many truncated calls appends one notice each and drifts
-    # past the ceiling the reserve was sized against.
+    # Every result may need a truncation notice, and the notices are not free, so the payload
+    # allowance is set aside for them up front -- otherwise a turn with many truncated calls appends
+    # one notice each and drifts past the ceiling the reserve was sized against.
+    #
+    # The floor at 0 is where that promise ends: once the notices alone would exceed `limit`
+    # (~158 truncated calls at the default), each still appends one and the total does drift over.
+    # _RESERVE_SLACK_TOKENS absorbs that, and no realistic turn issues that many calls, but the
+    # bound is "unless the notices alone exceed the limit", not "always".
     payload_allowance = max(0, limit - notice_tokens * len(outputs))
 
     capped: list[str] = []

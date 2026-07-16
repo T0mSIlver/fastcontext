@@ -255,7 +255,7 @@ def _turn_tokens(settings, default=6000):
 def test_superseded_config_key_is_converted_and_warns(tmp_path, capsys):
     path = _write(tmp_path / "c.toml", "max_tool_output_chars = 5000\n")
     settings = load_settings(str(tmp_path), config_path=str(path))
-    assert _turn_tokens(settings) == 1667  # 5000 chars / 3.0
+    assert _turn_tokens(settings) == 1667  # ceil(5000 / 3.0)
     err = capsys.readouterr().err
     assert "max_tool_output_chars" in err and "max_turn_output_tokens" in err
     assert "TOKENS" in err and "1667" in err, "the warning must state the unit change and the value"
@@ -264,7 +264,7 @@ def test_superseded_config_key_is_converted_and_warns(tmp_path, capsys):
 def test_superseded_env_var_is_converted_and_warns(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
     settings = load_settings(str(tmp_path), config_path="/nonexistent")
-    assert _turn_tokens(settings) == 2333  # 7000 chars / 3.0
+    assert _turn_tokens(settings) == 2334  # ceil(7000 / 3.0)
     err = capsys.readouterr().err
     assert "FC_MAX_TOOL_OUTPUT_CHARS" in err and "FC_MAX_TURN_OUTPUT_TOKENS" in err
 
@@ -345,3 +345,28 @@ def test_adopt_renamed_overrides_is_a_noop_without_an_old_name(capsys):
     overrides = config.adopt_renamed_overrides({"max_turn_output_tokens": None}, {"other": 1})
     assert overrides == {"max_turn_output_tokens": None}
     assert "deprecated" not in capsys.readouterr().err
+
+
+def test_the_disable_sentinel_survives_conversion(tmp_path, capsys):
+    """`0` means "no cap" under both the old name and the new one.
+
+    Scaling it landed on 1, i.e. a ONE-TOKEN cap: every tool result replaced by its own truncation
+    notice, so the agent sees nothing at all. The documented way to disable the cap turned into the
+    most aggressive possible setting.
+    """
+    path = _write(tmp_path / "c.toml", "max_tool_output_chars = 0\n")
+    settings = load_settings(str(tmp_path), config_path=str(path))
+    assert _turn_tokens(settings) == 0
+
+
+def test_a_negative_cap_is_not_scaled_into_a_tiny_one(tmp_path):
+    path = _write(tmp_path / "c.toml", "max_tool_output_chars = -1\n")
+    settings = load_settings(str(tmp_path), config_path=str(path))
+    assert _turn_tokens(settings) <= 0
+
+
+def test_a_small_cap_never_rounds_down_onto_the_sentinel(tmp_path):
+    """Rounding 2 chars down to 0 would flip "almost no cap" into "no cap at all"."""
+    path = _write(tmp_path / "c.toml", "max_tool_output_chars = 2\n")
+    settings = load_settings(str(tmp_path), config_path=str(path))
+    assert _turn_tokens(settings) == 1

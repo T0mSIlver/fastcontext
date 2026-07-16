@@ -113,7 +113,7 @@ flags. Only the model and endpoint are required.
 | `FC_TEMPERATURE` | — | `0.7` | Sampling temperature. |
 | `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
 | `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
-| `FC_MAX_TURN_OUTPUT_TOKENS` | — | `8000` | Total **tokens** of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. Supersedes the `*_CHARS` names, which are converted with a warning. |
+| `FC_MAX_TURN_OUTPUT_TOKENS` | — | `12000` | Total **tokens** of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. Supersedes the `*_CHARS` names, which are converted with a warning. |
 | `FC_MAX_RESULT_OUTPUT_TOKENS` | — | `0` (off) | Truncate a **single** tool result above this many **tokens** (`0` disables). Stops one big result eating the whole turn budget. |
 | `FC_MAX_CITATIONS` | — | `25` | Cap the number of citations in the final answer; a safety bound on a runaway list (`0` disables). |
 | `FC_CONTEXT_RESERVE` | — | auto | Tokens held back from the budget for one turn of tool output + the completion. |
@@ -142,7 +142,7 @@ api_key  = "dummy"                 # omit if your endpoint needs no auth
 # optional tuning
 max_tokens = "auto"                # int, or "auto" to detect from the provider
 max_context = 70000                # usable window; enables the context budget
-max_turn_output_tokens = 8000       # per-TURN total (tokens), across all of a turn's tool calls
+max_turn_output_tokens = 12000      # per-TURN total (tokens), across all of a turn's tool calls
 max_result_output_tokens = 0        # per-RESULT cap (tokens); 0 = off
 max_citations = 25                  # safety cap on the final answer's citation count (0 disables)
 reasoning_effort = "none"
@@ -311,7 +311,7 @@ A good default for a local llama.cpp preset serving 160k context with `--paralle
 
 ```bash
 export FC_MAX_CONTEXT=70000              # ~80k usable, minus headroom for the final turn
-export FC_MAX_TURN_OUTPUT_TOKENS=8000     # tokens per turn, across all its tool calls
+export FC_MAX_TURN_OUTPUT_TOKENS=12000    # tokens per turn, across all its tool calls
 # export FC_MAX_RESULT_OUTPUT_TOKENS=2500 # optional: keep one big Read from starving the same turn's greps
 ```
 
@@ -327,10 +327,10 @@ usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
 ```
 
 The reserve is substantial — it holds back a full turn of tool output plus the completion so the
-final-answer request still fits. With `max_turn_output_tokens=16000` and `max_tokens=4096` it is
-**26,315** tokens, and it does not shrink as the window does: it leaves **45,685** tokens to explore
-with at `max_context=72000` (the configuration measured below), but only ~43.7k at the `70000`
-suggested above — and nothing at all below ~26k, where every run would finalize on turn one.
+final-answer request still fits. At the defaults (`max_turn_output_tokens=12000`,
+`max_completion_tokens=4096`) it is **22,315** tokens, and it does not shrink as the window does: it
+leaves **49,685** tokens to explore with at `max_context=72000`, but only ~47.7k at the `70000`
+suggested above — and nothing at all below ~22.3k, where every run would finalize on turn one.
 
 **Measured** — 12 runs over 6 repos (186 to 47k source files), easy lookups and hard multi-module
 traces, each at `--max-turns 16` against `fastcontext-1.0-4b-rl-q8_0` on llama.cpp
@@ -345,9 +345,8 @@ traces, each at `--max-turns 16` against `fastcontext-1.0-4b-rl-q8_0` on llama.c
 | Runs the budget stopped early | 1 / 12 (a `llama.cpp` KV-cache trace, finalized at turn 13) |
 | Runs returning a usable answer | 12 / 12 |
 
-At the median burn rate the 45,685-token allowance covers ~23 turns; at the heaviest sustained rate
-observed (3.4k/turn) it covers ~13 — which is where the one budget-limited run finalized, and it still
-answered correctly. So **`--max-turns 12`** stays inside the context budget in every case measured,
+At the median burn rate the 49,685-token allowance covers ~25 turns; at the heaviest sustained rate
+observed (3.4k/turn) it covers ~14. So **`--max-turns 12`** stays inside the context budget in every case measured,
 and `16` is a reasonable ceiling for hard traces. `4` and `8` cut exploration short on over half the
 runs. Note the cap is not a promise of sufficiency: 6 runs would have kept exploring past 16 had they
 been allowed to, so a higher cap costs latency, not correctness.
