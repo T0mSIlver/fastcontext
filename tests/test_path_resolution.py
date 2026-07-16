@@ -1,9 +1,10 @@
 """Tests for resolve_path and the absolute-path directory listing.
 
 resolve_path recovers from the model's habit of emitting a mangled absolute
-prefix (e.g. using the repo name as the filesystem root) and tells the model
-when the lossy suffix-matching fallback was used. The system-prompt listing is
-rendered with absolute paths so the model is primed to pass absolute paths.
+prefix (e.g. using the repo name as the filesystem root). The rewrite is silent:
+the intent is unambiguous, so tool output must not carry a note about it. The
+system-prompt listing is rendered with absolute paths so the model is primed to
+pass absolute paths.
 """
 
 import asyncio
@@ -25,13 +26,11 @@ def _make_repo(tmp: str) -> Path:
     return repo
 
 
-def test_absolute_in_cwd_is_verbatim_no_note():
+def test_absolute_in_cwd_is_verbatim():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
         full = str(repo / "src" / "pkg" / "llm.py")
-        resolved, note = resolve_path(full, str(repo))
-        assert resolved == full
-        assert note is None
+        assert resolve_path(full, str(repo)) == full
 
 
 def test_absolute_in_cwd_nonexistent_is_verbatim():
@@ -40,36 +39,30 @@ def test_absolute_in_cwd_nonexistent_is_verbatim():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
         full = str(repo / "src" / "missing.py")
-        resolved, note = resolve_path(full, str(repo))
-        assert resolved == full
-        assert note is None
+        assert resolve_path(full, str(repo)) == full
 
 
-def test_relative_path_resolved_to_cwd_no_note():
+def test_relative_path_resolved_to_cwd():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("src/pkg/llm.py", str(repo))
+        resolved = resolve_path("src/pkg/llm.py", str(repo))
         assert resolved == str((repo / "src" / "pkg" / "llm.py").resolve())
-        assert note is None
 
 
-def test_mangled_repo_name_prefix_suffix_matches_with_note():
+def test_mangled_repo_name_prefix_suffix_matches():
     # cwd=/.../myrepo, model emits /myrepo/src/pkg/llm.py (repo name as root).
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("/myrepo/src/pkg/llm.py", str(repo))
+        resolved = resolve_path("/myrepo/src/pkg/llm.py", str(repo))
         assert resolved == str((repo / "src" / "pkg" / "llm.py").resolve())
-        assert note is not None
-        assert "<system-reminder>" in note
 
 
 def test_arbitrary_mangled_prefix_suffix_matches():
     # Any wrong absolute prefix recovers to the longest existing suffix.
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("/totally/wrong/src/pkg/llm.py", str(repo))
+        resolved = resolve_path("/totally/wrong/src/pkg/llm.py", str(repo))
         assert resolved == str((repo / "src" / "pkg" / "llm.py").resolve())
-        assert note is not None
 
 
 def test_longest_suffix_wins():
@@ -77,7 +70,7 @@ def test_longest_suffix_wins():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
         (repo / "llm.py").write_text("top\n", encoding="utf-8")
-        resolved, _ = resolve_path("/x/src/pkg/llm.py", str(repo))
+        resolved = resolve_path("/x/src/pkg/llm.py", str(repo))
         assert resolved == str((repo / "src" / "pkg" / "llm.py").resolve())
 
 
@@ -86,24 +79,21 @@ def test_bare_repo_name_root_resolves_to_workspace_root():
     # the filesystem root and passes "/myrepo" meaning the workspace itself.
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("/myrepo", str(repo))
+        resolved = resolve_path("/myrepo", str(repo))
         assert Path(resolved).resolve() == repo.resolve()
-        assert note is not None
 
 
 def test_bare_arbitrary_root_resolves_to_workspace_root():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, _ = resolve_path("/whatever", str(repo))
+        resolved = resolve_path("/whatever", str(repo))
         assert Path(resolved).resolve() == repo.resolve()
 
 
-def test_unresolvable_absolute_returns_unchanged_no_note():
+def test_unresolvable_absolute_returns_unchanged():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("/nowhere/nope.py", str(repo))
-        assert resolved == "/nowhere/nope.py"
-        assert note is None
+        assert resolve_path("/nowhere/nope.py", str(repo)) == "/nowhere/nope.py"
 
 
 def test_relative_escape_returns_unchanged():
@@ -111,9 +101,7 @@ def test_relative_escape_returns_unchanged():
     # reject, never silently resolved outside cwd.
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
-        resolved, note = resolve_path("../secret.py", str(repo))
-        assert resolved == "../secret.py"
-        assert note is None
+        assert resolve_path("../secret.py", str(repo)) == "../secret.py"
 
 
 def test_suffix_match_never_escapes_cwd():
@@ -122,9 +110,8 @@ def test_suffix_match_never_escapes_cwd():
         repo = _make_repo(tmp)
         outside = Path(tmp) / "secret.py"
         outside.write_text("secret\n", encoding="utf-8")
-        resolved, note = resolve_path("/myrepo/../secret.py", str(repo))
+        resolved = resolve_path("/myrepo/../secret.py", str(repo))
         assert Path(resolved).resolve() != outside.resolve()
-        assert note is None  # nothing inside cwd matched
 
 
 def test_directory_listing_uses_absolute_paths():
@@ -136,7 +123,7 @@ def test_directory_listing_uses_absolute_paths():
         assert "\nsrc\n" not in prompt
 
 
-def test_read_tool_resolves_mangled_path_and_notifies():
+def test_read_tool_resolves_mangled_path_silently():
     read = ReadTool()
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
@@ -144,10 +131,10 @@ def test_read_tool_resolves_mangled_path_and_notifies():
             read.call(json.dumps({"path": "/myrepo/src/pkg/llm.py"}), cwd=str(repo))
         )
         assert "MODEL = 'x'" in out  # file content was actually read
-        assert "<system-reminder>" in out  # model was told about the rewrite
+        assert "<system-reminder>" not in out  # no note about the rewrite
 
 
-def test_grep_tool_resolves_mangled_path_and_notifies():
+def test_grep_tool_resolves_mangled_path_silently():
     grep = GrepTool()
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
@@ -158,10 +145,10 @@ def test_grep_tool_resolves_mangled_path_and_notifies():
             )
         )
         assert "MODEL = 'x'" in out  # the search actually ran against the real directory
-        assert "<system-reminder>" in out
+        assert "<system-reminder>" not in out
 
 
-def test_glob_tool_resolves_mangled_path_and_notifies():
+def test_glob_tool_resolves_mangled_path_silently():
     glob = GlobTool()
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
@@ -169,4 +156,4 @@ def test_glob_tool_resolves_mangled_path_and_notifies():
             glob.call(json.dumps({"directory": "/myrepo/src", "pattern": "*.py"}), cwd=str(repo))
         )
         assert "llm.py" in out  # the glob actually matched inside the real directory
-        assert "<system-reminder>" in out
+        assert "<system-reminder>" not in out

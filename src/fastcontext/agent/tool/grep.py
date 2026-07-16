@@ -82,7 +82,7 @@ class GrepTool(Tool):
         head_limit = params.get("head_limit")
         multiline = params.get("multiline")
 
-        path, path_note = resolve_path(path, cwd)
+        path = resolve_path(path, cwd)
         if not Path(path).resolve().is_relative_to(Path(cwd).resolve()):
             return f"<system-reminder>Permission error: `{path}` is not within the working directory `{cwd}`</system-reminder>"
 
@@ -114,8 +114,6 @@ class GrepTool(Tool):
                 truncated_hit = f"Results truncated to first {limit} lines"
                 output += f"\n{truncated_hit}"
 
-        if path_note:
-            output = f"{path_note}\n{output}"
         return output
 
 

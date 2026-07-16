@@ -42,7 +42,7 @@ class ReadTool(Tool):
             return "<system-reminder>Error: file path is required</system-reminder>"
 
         cwd = kwargs.get("cwd", Path.cwd().as_posix())
-        file_path, path_note = resolve_path(file_path, cwd)
+        file_path = resolve_path(file_path, cwd)
         if not Path(file_path).resolve().is_relative_to(Path(cwd).resolve()):
             return f"<system-reminder>Permission error: `{file_path}` is not within the working directory `{cwd}`</system-reminder>"
 
@@ -86,7 +86,4 @@ class ReadTool(Tool):
         if total_read_lines > MAX_LINE:
             lines.append("...")
         content = "".join(lines)
-        output = f"```{file_path}:{offset}-{end_line}\n{content}\n```"
-        if path_note:
-            output = f"{path_note}\n{output}"
-        return output
+        return f"```{file_path}:{offset}-{end_line}\n{content}\n```"

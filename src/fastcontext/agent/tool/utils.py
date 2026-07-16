@@ -15,16 +15,15 @@ def _find_existing_rg() -> str | None:
 RG_PATH = _find_existing_rg()
 
 
-def resolve_path(file_path: str, cwd: str) -> tuple[str, str | None]:
+def resolve_path(file_path: str, cwd: str) -> str:
     """Best-effort map a model-supplied path onto a real path inside ``cwd``.
 
-    Returns ``(resolved_path, note)``. ``note`` is ``None`` when the path was
-    used verbatim or resolved unambiguously (a relative path joined to the
-    workspace root). When the lossy suffix-matching heuristic is used to
-    recover from a mangled absolute prefix (e.g. the model uses the repo name
-    as the filesystem root: ``/myrepo/src/foo.py``), ``note`` is a
-    ``<system-reminder>`` describing the rewrite so the model can correct the
-    path form on subsequent calls.
+    The model routinely emits an absolute path whose root is the repository name
+    rather than the filesystem root (``/myrepo/src/foo.py`` for
+    ``<cwd>/src/foo.py``). The intent is unambiguous, so the rewrite happens
+    silently: the tool output carries no note about it. Telling the model it had
+    "the wrong form" spent tokens on every such call and did not change the
+    behaviour -- it is how the model refers to workspace files.
 
     The caller is still responsible for the ``is_relative_to(cwd)`` permission
     check; this helper only proposes a candidate and never widens access
@@ -37,18 +36,18 @@ def resolve_path(file_path: str, cwd: str) -> tuple[str, str | None]:
     try:
         p = Path(file_path)
         if p.is_absolute() and p.resolve().is_relative_to(cwd_path):
-            return file_path, None
+            return file_path
     except (OSError, ValueError):
         pass
 
-    # 2. Relative path: resolve against the workspace root. Unambiguous, so no
-    #    note. A relative path escaping the workspace (e.g. ``../x``) is left
-    #    unchanged for the caller to reject.
+    # 2. Relative path: resolve against the workspace root. A relative path
+    #    escaping the workspace (e.g. ``../x``) is left unchanged for the caller
+    #    to reject.
     if not Path(file_path).is_absolute():
         candidate = (cwd_path / file_path).resolve()
         if candidate.is_relative_to(cwd_path):
-            return str(candidate), None
-        return file_path, None
+            return str(candidate)
+        return file_path
 
     # 3. Absolute path outside the workspace: the model likely mangled the
     #    prefix. Recover by matching the longest trailing segment that exists
@@ -57,23 +56,14 @@ def resolve_path(file_path: str, cwd: str) -> tuple[str, str | None]:
     for i in range(1, len(parts)):
         candidate = (cwd_path / Path(*parts[i:])).resolve()
         if candidate.is_relative_to(cwd_path) and candidate.exists():
-            return str(candidate), _rewrite_note(file_path, candidate, cwd_path)
+            return str(candidate)
 
     # 4. A single-component absolute path ("/myrepo") is the model using the repo
     #    name as the filesystem root: it denotes the workspace itself. Deeper paths
     #    are NOT collapsed to the workspace — an unmatched suffix must stay an error
     #    rather than silently widening a Read/Grep to the whole repository.
     if len(parts) == 2:
-        return str(cwd_path), _rewrite_note(file_path, cwd_path, cwd_path)
+        return str(cwd_path)
 
     # 5. No match: return unchanged so the caller emits its normal error.
-    return file_path, None
-
-
-def _rewrite_note(original: str, resolved: Path, cwd_path: Path) -> str:
-    return (
-        f"<system-reminder>Note: '{original}' is not inside the workspace; "
-        f"interpreted it as the closest match '{resolved}'. Use absolute paths "
-        f"under '{cwd_path}' exactly as shown in the workspace directory listing "
-        f"and tool output to avoid ambiguity.</system-reminder>"
-    )
+    return file_path

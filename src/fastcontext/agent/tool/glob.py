@@ -46,7 +46,7 @@ class GlobTool(Tool):
         directory = params.get("directory", cwd)
         pattern = params.get("pattern")
 
-        directory, path_note = resolve_path(directory, cwd)
+        directory = resolve_path(directory, cwd)
 
         p = Path(directory)
         if not p.is_dir():
@@ -64,7 +64,4 @@ class GlobTool(Tool):
                 f"Results are truncated: showing first {limit} results. Consider using a more specific path or pattern."
             )
 
-        result = "\n".join(matched_files) if matched_files else "No files found"
-        if path_note:
-            result = f"{path_note}\n{result}"
-        return result
+        return "\n".join(matched_files) if matched_files else "No files found"
