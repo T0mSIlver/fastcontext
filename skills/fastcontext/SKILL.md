@@ -55,5 +55,5 @@ Parse the `path:line-range` entries and **read only those spans** — that's the
 
 - **stdout = answer, stderr = diagnostics.** Read stdout; ignore stderr.
 - Cited ranges are validated — line ranges the model never actually opened are dropped, so what you get is safe to open directly.
-- **Exit code is 0 even on failure.** If stdout contains `LLM API call failed`, the run failed — retry or fall back to manual exploration.
+- **A nonzero exit code means the run failed** (e.g. the endpoint was unreachable); the error is on stderr and stdout stays empty. Exit `0` with a `<final_answer>` block is a good run — retry or fall back to manual exploration only on a nonzero exit.
 - Ask specific questions; run several queries for a multi-part investigation.
