@@ -42,14 +42,30 @@ DEFAULT_CONTEXT_RESERVE = 8192
 # estimation error, and the per-result truncation notices a many-call turn appends.
 _RESERVE_SLACK_TOKENS = 2048
 
-# Total tool output ONE turn may add, in characters (not per result -- see cap_turn_outputs).
-# ~4k tokens of ASCII source, and the reserve is sized against it at worst-case density, so the
-# value is a direct trade: raising it buys the model more per turn and costs usable context.
+# Total tool output ONE turn may add, in TOKENS (not per result -- see cap_turn_outputs).
+#
+# Tokens, not characters, because the window is measured in tokens and the reserve has to bound what
+# a turn can add to it. A character cap cannot: 16k chars is ~3.8k tokens of ASCII source but 16k
+# tokens of CJK, so a reserve sized against a char cap has to assume the worst case and hold back ~4x
+# what a turn of source actually costs. That pessimism is not free -- it came straight out of the
+# explorable window, which forced the cap low enough to truncate 9% of tool results in a 12-run eval,
+# and truncation is what a repo-exploration agent must not do: the model then pages the same file
+# back in over several turns (21 re-reads of one file in the worst run), spending the very context
+# the cap was protecting, and any range it does not page back in is simply lost to the answer.
+#
+# Charging tokens directly makes the reserve exact, which buys back enough window to raise the real
+# allowance instead of trading it away: 8k tokens passes ~24k chars of ASCII source per turn (half
+# again the old 16k-char cap) while reserving 8k tokens LESS. Both ends improve, which is why this is
+# not a tuning choice between reading and exploring.
+#
+# The size is set by what a turn must survive, not by taste: at the heaviest per-turn burn observed
+# in the eval (~4.1k tokens/turn) the old cap's reserve left room for only ~11 turns -- under the
+# default of 12, so the budget, not the turn cap, was ending heavy runs. 8k leaves room for ~13.
 # Read's own 2000-line x 500-char ceiling would otherwise allow ~250k tokens from a single call.
-DEFAULT_MAX_TURN_OUTPUT_CHARS = 16_000
+DEFAULT_MAX_TURN_OUTPUT_TOKENS = 8_000
 
 TRUNCATION_NOTICE = (
-    "\n<system-reminder>Output truncated: it exceeded the {scope} limit of {limit} characters. "
+    "\n<system-reminder>Output truncated: it exceeded the {scope} limit of {limit} tokens. "
     "Read a specific line range with the Read tool's offset/limit parameters, or narrow the search, "
     "to see the rest.</system-reminder>"
 )
@@ -102,18 +118,39 @@ def estimate_tools_tokens(tools: list[dict] | None) -> int:
     return estimate_tokens(json.dumps(tools))
 
 
+def truncate_to_tokens(text: str, budget: int) -> str:
+    """The longest prefix of ``text`` that costs at most ``budget`` estimated tokens.
+
+    ``estimate_tokens`` is monotonic in prefix length, so the answer is found by bisection rather
+    than by assuming a chars-per-token ratio -- which is the whole point: the ratio is what differs
+    by an order of magnitude between ASCII source and CJK.
+    """
+    if budget <= 0:
+        return ""
+    if estimate_tokens(text) <= budget:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimate_tokens(text[:mid]) <= budget:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low]
+
+
 def cap_tool_output(output: str, limit: int) -> str:
-    """Bound a single tool result so that one call cannot exhaust the window.
+    """Bound a single tool result, in tokens, so that one call cannot exhaust the window.
 
     ``limit`` <= 0 disables the cap.
     """
-    if limit <= 0 or len(output) <= limit:
+    if limit <= 0 or estimate_tokens(output) <= limit:
         return output
-    return output[:limit] + TRUNCATION_NOTICE.format(limit=limit, scope=_RESULT_SCOPE)
+    return truncate_to_tokens(output, limit) + TRUNCATION_NOTICE.format(limit=limit, scope=_RESULT_SCOPE)
 
 
 def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
-    """Bound the *total* tool output a single turn can add.
+    """Bound the *total* tool output a single turn can add, in tokens.
 
     A per-result cap alone is not enough: the model can issue several tool calls in one
     turn, and N results each just under the cap still add N x cap to the prompt. That can
@@ -127,47 +164,50 @@ def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
         return list(outputs)
 
     notice = TRUNCATION_NOTICE.format(limit=limit, scope=_TURN_SCOPE)
+    notice_tokens = estimate_tokens(notice)
     # Every result may need a truncation notice, and the notices are not free. Set the payload
     # allowance aside for them up front so the turn's total stays under `limit` for ANY number of
     # tool calls -- otherwise a turn with many truncated calls appends one notice each and drifts
     # past the ceiling the reserve was sized against.
-    payload_allowance = max(0, limit - len(notice) * len(outputs))
+    payload_allowance = max(0, limit - notice_tokens * len(outputs))
 
     capped: list[str] = []
     remaining = payload_allowance
     for output in outputs:
-        if len(output) <= remaining:
+        cost = estimate_tokens(output)
+        if cost <= remaining:
             capped.append(output)
-            remaining -= len(output)
+            remaining -= cost
             continue
         # Truncate to whatever the turn has left -- which may be nothing. Note this cannot
         # delegate to cap_tool_output(): there a limit of 0 means "no cap", so an exhausted
         # allowance would let the rest of the turn's output through untouched.
-        capped.append(output[:remaining] + notice)
+        capped.append(truncate_to_tokens(output, remaining) + notice)
         remaining = 0
     return capped
 
 
-def required_reserve(max_turn_output_chars: int, max_completion_tokens: int) -> int:
+def required_reserve(max_turn_output_tokens: int, max_completion_tokens: int) -> int:
     """The smallest reserve that keeps the final-answer turn sendable.
 
     The budget can only trip *after* a turn's tool results have landed, so the reserve has to
     absorb everything one turn can add on top of a prompt that was still under the limit:
 
-      - the turn's tool output, at worst-case token density (see below),
+      - the turn's tool output, now bounded directly in tokens,
       - the assistant message that requested the tools, bounded by the completion limit,
       - the completion the model still has to write for the final answer.
 
-    Tool output is charged at **one token per character**, not the ASCII ratio. A turn is capped
-    in *characters*, and CJK / i18n resources tokenize at roughly one token per character, so an
-    ASCII-calibrated reserve would be several times too small on exactly the content that already
-    strains the window.
+    Charging the turn cap straight through is exact, because the cap is enforced with the same
+    (deliberately over-counting) estimator the budget uses. The previous cap was in characters, which
+    left no honest choice but to charge one token per character -- CJK really does tokenize that
+    densely -- and so reserved ~4x what a turn of ASCII source actually costs. That difference was
+    context the agent could have been exploring with.
     """
-    if max_turn_output_chars <= 0:
+    if max_turn_output_tokens <= 0:
         # No cap on tool output means no bound on what one turn can add; the reserve cannot make
         # any promise, so fall back to the flat default.
         return DEFAULT_CONTEXT_RESERVE
-    worst_case_turn_tokens = max_turn_output_chars
+    worst_case_turn_tokens = max_turn_output_tokens
     needed = (
         worst_case_turn_tokens
         + 2 * max_completion_tokens

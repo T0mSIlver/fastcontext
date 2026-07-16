@@ -2,7 +2,7 @@ import sys
 
 from fastcontext.agent.agent import Agent
 from fastcontext.agent.budget import (
-    DEFAULT_MAX_TURN_OUTPUT_CHARS,
+    DEFAULT_MAX_TURN_OUTPUT_TOKENS,
     ContextBudget,
     required_reserve,
 )
@@ -20,8 +20,8 @@ _OVERRIDE_KEYS = (
     "temperature",
     "max_tokens",
     "max_context",
-    "max_turn_output_chars",
-    "max_result_output_chars",
+    "max_turn_output_tokens",
+    "max_result_output_tokens",
     "context_reserve",
     "reasoning_effort",
     "max_citations",
@@ -57,12 +57,12 @@ def make_fastcontext_agent(
     # guess it safely, because a server's usable window is often far below its configured one --
     # llama.cpp with --parallel 2 halves it per slot.
     max_context = settings.int_("max_context", "FC_MAX_CONTEXT", 0)
-    max_turn_output_chars = settings.int_(
-        "max_turn_output_chars", "FC_MAX_TURN_OUTPUT_CHARS", DEFAULT_MAX_TURN_OUTPUT_CHARS
+    max_turn_output_tokens = settings.int_(
+        "max_turn_output_tokens", "FC_MAX_TURN_OUTPUT_TOKENS", DEFAULT_MAX_TURN_OUTPUT_TOKENS
     )
     # Off by default: the turn budget above is what protects the window, and this only changes how
     # that budget is shared between the calls of a single turn.
-    max_result_output_chars = settings.int_("max_result_output_chars", "FC_MAX_RESULT_OUTPUT_CHARS", 0)
+    max_result_output_tokens = settings.int_("max_result_output_tokens", "FC_MAX_RESULT_OUTPUT_TOKENS", 0)
     max_citations = settings.int_("max_citations", "FC_MAX_CITATIONS", DEFAULT_MAX_CITATIONS)
 
     # max_tokens (the per-response completion cap): the resolved source (override > FC_MAX_TOKENS env
@@ -90,7 +90,7 @@ def make_fastcontext_agent(
     # full turn of tool output plus the completion -- otherwise the agent can cross the limit and
     # find that even the final-answer request no longer fits.
     reserve = settings.int_("context_reserve", "FC_CONTEXT_RESERVE", 0) or required_reserve(
-        max_turn_output_chars, max_tokens
+        max_turn_output_tokens, max_tokens
     )
 
     from fastcontext.agent.tool.glob import GlobTool
@@ -113,9 +113,9 @@ def make_fastcontext_agent(
             "often below its configured one (llama.cpp --parallel 2 halves it per slot).",
             file=sys.stderr,
         )
-    elif max_turn_output_chars <= 0:
+    elif max_turn_output_tokens <= 0:
         print(
-            "warning: tool-output cap disabled (FC_MAX_TURN_OUTPUT_CHARS is 0) while a context "
+            "warning: tool-output cap disabled (FC_MAX_TURN_OUTPUT_TOKENS is 0) while a context "
             "budget is set. A single Read can return ~250k tokens and overshoot the window in one "
             "turn, which the budget cannot undo.",
             file=sys.stderr,
@@ -124,8 +124,8 @@ def make_fastcontext_agent(
     toolset = ToolSet(
         [ReadTool(), GlobTool(), GrepTool()],
         work_dir=work_dir,
-        max_turn_output_chars=max_turn_output_chars,
-        max_result_output_chars=max_result_output_chars,
+        max_turn_output_tokens=max_turn_output_tokens,
+        max_result_output_tokens=max_result_output_tokens,
     )
     return Agent(
         name=name,

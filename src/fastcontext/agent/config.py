@@ -50,37 +50,67 @@ _ENDPOINT_KEYS = (
 _TUNING_KEYS = (
     ("max_tokens", "FC_MAX_TOKENS", None),
     ("max_context", "FC_MAX_CONTEXT", None),
-    ("max_turn_output_chars", "FC_MAX_TURN_OUTPUT_CHARS", None),
-    ("max_result_output_chars", "FC_MAX_RESULT_OUTPUT_CHARS", None),
+    ("max_turn_output_tokens", "FC_MAX_TURN_OUTPUT_TOKENS", None),
+    ("max_result_output_tokens", "FC_MAX_RESULT_OUTPUT_TOKENS", None),
     ("max_citations", "FC_MAX_CITATIONS", None),
     ("context_reserve", "FC_CONTEXT_RESERVE", None),
     ("reasoning_effort", "FC_REASONING_EFFORT", None),
     ("temperature", "FC_TEMPERATURE", None),
 )
 
-# Renamed settings: old name -> new name. `max_tool_output_chars` said "tool" but bounded a whole
-# TURN, which is exactly the confusion the rename removes -- so the old name is still honored rather
-# than ignored: it is the cap the context reserve is sized against, and silently dropping it would
-# move that cap without telling anyone. The warning is what makes the change visible.
-_RENAMED_KEYS = {"max_tool_output_chars": "max_turn_output_chars"}
-_RENAMED_ENV = {"FC_MAX_TOOL_OUTPUT_CHARS": "FC_MAX_TURN_OUTPUT_CHARS"}
-_RENAMED_KEY_BY_NEW = {new: old for old, new in _RENAMED_KEYS.items()}
-_RENAMED_ENV_BY_NEW = {new: old for old, new in _RENAMED_ENV.items()}
+# Superseded settings: old name -> (new name, converter). The output caps moved from characters to
+# tokens, so these are not plain aliases -- reusing a char number as a token budget would silently
+# triple it. The value is converted at the ASCII ratio the old char cap was chosen against, which
+# preserves what the setter meant (16000 chars of source ~= 5300 tokens) rather than what they typed.
+#
+# They are converted rather than ignored because the turn cap is what the context reserve is sized
+# against: dropping it silently would move that cap without telling anyone. The warning is what makes
+# the change visible.
+_ASCII_CHARS_PER_TOKEN = 3.0
+
+
+def _chars_to_tokens(value: Any) -> int | None:
+    try:
+        return max(1, round(int(str(value).strip()) / _ASCII_CHARS_PER_TOKEN))
+    except (TypeError, ValueError):
+        return None
+
+
+_RENAMED_KEYS: dict[str, tuple[str, Any]] = {
+    "max_tool_output_chars": ("max_turn_output_tokens", _chars_to_tokens),
+    "max_turn_output_chars": ("max_turn_output_tokens", _chars_to_tokens),
+    "max_tool_result_chars": ("max_result_output_tokens", _chars_to_tokens),
+    "max_result_output_chars": ("max_result_output_tokens", _chars_to_tokens),
+}
+_RENAMED_ENV: dict[str, tuple[str, Any]] = {
+    "FC_MAX_TOOL_OUTPUT_CHARS": ("FC_MAX_TURN_OUTPUT_TOKENS", _chars_to_tokens),
+    "FC_MAX_TURN_OUTPUT_CHARS": ("FC_MAX_TURN_OUTPUT_TOKENS", _chars_to_tokens),
+    "FC_MAX_TOOL_RESULT_CHARS": ("FC_MAX_RESULT_OUTPUT_TOKENS", _chars_to_tokens),
+    "FC_MAX_RESULT_OUTPUT_CHARS": ("FC_MAX_RESULT_OUTPUT_TOKENS", _chars_to_tokens),
+}
+# A new name may supersede several old ones; the lookup only needs one direction each.
+_RENAMED_KEY_BY_NEW: dict[str, list[str]] = {}
+for _old, (_new, _conv) in _RENAMED_KEYS.items():
+    _RENAMED_KEY_BY_NEW.setdefault(_new, []).append(_old)
+_RENAMED_ENV_BY_NEW: dict[str, list[str]] = {}
+for _old, (_new, _conv) in _RENAMED_ENV.items():
+    _RENAMED_ENV_BY_NEW.setdefault(_new, []).append(_old)
 
 # Warn once per name per process; a per-run diagnostic repeated on every lookup is just noise.
 _WARNED: set[str] = set()
 
 
-def _warn_renamed(old: str, new: str) -> None:
+def _warn_renamed(old: str, new: str, converted: Any = None) -> None:
     if old in _WARNED:
         return
     _WARNED.add(old)
-    print(
-        f"warning: '{old}' is deprecated and will be removed; use '{new}'. It bounds the total tool "
-        f"output of one TURN, not of a single result -- for that, see the max_result_output_chars / "
-        f"FC_MAX_RESULT_OUTPUT_CHARS setting.",
-        file=sys.stderr,
-    )
+    detail = ""
+    if converted is not None:
+        detail = (
+            f" The cap is now measured in TOKENS, not characters, so the value was converted to "
+            f"{converted}; set '{new}' explicitly to choose your own."
+        )
+    print(f"warning: '{old}' is deprecated and will be removed; use '{new}'.{detail}", file=sys.stderr)
 
 
 def warn_renamed_flag(old_flag: str, new_flag: str) -> None:
@@ -90,18 +120,22 @@ def warn_renamed_flag(old_flag: str, new_flag: str) -> None:
 
 
 def adopt_renamed_overrides(overrides: dict[str, Any], kwargs: Mapping[str, Any]) -> dict[str, Any]:
-    """Move a renamed setting passed under its old name onto its new key.
+    """Move a superseded setting passed under its old name onto its new key, converting the unit.
 
     A programmatic caller passing ``max_tool_output_chars=`` would otherwise have it swallowed by
     ``**kwargs`` and silently ignored -- landing on the default cap instead of the one they asked
     for. That is the same "moves the cap without telling anyone" failure the env/file shim exists to
     prevent, so it is closed the same way. An explicit new-name value always wins.
     """
-    for old, new in _RENAMED_KEYS.items():
+    for old, (new, converter) in _RENAMED_KEYS.items():
         value = kwargs.get(old)
-        if value is not None and overrides.get(new) is None:
-            _warn_renamed(old, new)
-            overrides[new] = value
+        if value is None or overrides.get(new) is not None:
+            continue
+        converted = converter(value) if converter else value
+        if converted is None:
+            continue
+        _warn_renamed(old, new, converted if converter else None)
+        overrides[new] = converted
     return overrides
 
 
@@ -158,16 +192,25 @@ class Settings:
         if key in self._file:
             return self._file[key]
 
-        old_env = _RENAMED_ENV_BY_NEW.get(env)
-        if old_env:
+        for old_env in _RENAMED_ENV_BY_NEW.get(env, ()):
             value = os.getenv(old_env)
-            if value is not None:
-                _warn_renamed(old_env, env)
-                return value
-        old_key = _RENAMED_KEY_BY_NEW.get(key)
-        if old_key and old_key in self._file:
-            _warn_renamed(old_key, key)
-            return self._file[old_key]
+            if value is None:
+                continue
+            converter = _RENAMED_ENV[old_env][1]
+            converted = converter(value) if converter else value
+            if converted is None:
+                continue
+            _warn_renamed(old_env, env, converted if converter else None)
+            return converted
+        for old_key in _RENAMED_KEY_BY_NEW.get(key, ()):
+            if old_key not in self._file:
+                continue
+            converter = _RENAMED_KEYS[old_key][1]
+            converted = converter(self._file[old_key]) if converter else self._file[old_key]
+            if converted is None:
+                continue
+            _warn_renamed(old_key, key, converted if converter else None)
+            return converted
         return None
 
     def str_(self, key: str, env: str, legacy_env: str | None = None, default: str | None = None) -> str | None:

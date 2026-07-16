@@ -67,8 +67,8 @@ Everything below is in this fork on top of the original explorer:
 - 🖥️ **Live TUI run inspector** (`--tui`) — stream a run as collapsible rows (reasoning, each tool
   call, each result, the final answer) with a docked token-usage bar. Far more legible than dumping
   raw JSON. See [Quick start](#quick-start--watch-a-run-in-the-tui).
-- 🧮 **Context-budget management** (`--max-context`, `--max-turn-output-chars`,
-  `--max-result-output-chars`) — tracks the growing conversation and, as it approaches the window,
+- 🧮 **Context-budget management** (`--max-context`, `--max-turn-output-tokens`,
+  `--max-result-output-tokens`) — tracks the growing conversation and, as it approaches the window,
   tells the agent to answer *now* instead of exploring its way into a prompt the server rejects. A
   per-turn output cap stops one giant `Read` from blowing the window in a single turn; a per-result
   cap stops it starving the other calls of the same turn.
@@ -113,8 +113,8 @@ flags. Only the model and endpoint are required.
 | `FC_TEMPERATURE` | — | `0.7` | Sampling temperature. |
 | `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
 | `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
-| `FC_MAX_TURN_OUTPUT_CHARS` | — | `16000` | Total characters of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. Renamed from `FC_MAX_TOOL_OUTPUT_CHARS`, still honored with a warning. |
-| `FC_MAX_RESULT_OUTPUT_CHARS` | — | `0` (off) | Truncate a **single** tool result above this many characters (`0` disables). Stops one big result eating the whole turn budget. |
+| `FC_MAX_TURN_OUTPUT_TOKENS` | — | `8000` | Total **tokens** of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. Supersedes the `*_CHARS` names, which are converted with a warning. |
+| `FC_MAX_RESULT_OUTPUT_TOKENS` | — | `0` (off) | Truncate a **single** tool result above this many **tokens** (`0` disables). Stops one big result eating the whole turn budget. |
 | `FC_MAX_CITATIONS` | — | `25` | Cap the number of citations in the final answer; a safety bound on a runaway list (`0` disables). |
 | `FC_CONTEXT_RESERVE` | — | auto | Tokens held back from the budget for one turn of tool output + the completion. |
 | `FC_REASONING_EFFORT` | — | — | Passed through to servers that support it (`none`/`low`/`medium`/`high`/`max`). |
@@ -142,8 +142,8 @@ api_key  = "dummy"                 # omit if your endpoint needs no auth
 # optional tuning
 max_tokens = "auto"                # int, or "auto" to detect from the provider
 max_context = 70000                # usable window; enables the context budget
-max_turn_output_chars = 16000       # per-TURN total, across all of a turn's tool calls
-max_result_output_chars = 0         # per-RESULT cap; 0 = off (see Sizing tokens below)
+max_turn_output_tokens = 8000       # per-TURN total (tokens), across all of a turn's tool calls
+max_result_output_tokens = 0        # per-RESULT cap (tokens); 0 = off
 max_citations = 25                  # safety cap on the final answer's citation count (0 disables)
 reasoning_effort = "none"
 temperature = 0.0
@@ -262,8 +262,8 @@ fastcontext -q "<query>" [options]
 | `--verbose` | Print runtime info and each turn to the terminal. |
 | `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
 | `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
-| `--max-turn-output-chars` | Total tool output one **turn** may add, across all its calls (`0` disables). Overrides `FC_MAX_TURN_OUTPUT_CHARS`. (Deprecated alias: `--max-tool-output-chars`.) |
-| `--max-result-output-chars` | Truncate a **single** tool result above this size (`0` disables, the default). Overrides `FC_MAX_RESULT_OUTPUT_CHARS`. |
+| `--max-turn-output-tokens` | Total tool output, in **tokens**, one **turn** may add across all its calls (`0` disables). Overrides `FC_MAX_TURN_OUTPUT_TOKENS`. |
+| `--max-result-output-tokens` | Truncate a **single** tool result above this many **tokens** (`0` disables, the default). Overrides `FC_MAX_RESULT_OUTPUT_TOKENS`. |
 | `--max-citations` | Cap the number of citations in the final answer; a safety bound (`0` disables). Overrides `FC_MAX_CITATIONS` (default `25`). |
 | `--config` | Path to a TOML config file. Overrides `FC_CONFIG` and config-file discovery. |
 
@@ -283,28 +283,36 @@ Two independent knobs control token limits; both matter for reliable runs:
   run from growing the prompt until the server rejects it (`exceeds the available context size`). It
   is **off by default** (`0`), because a safe value can't be guessed blindly: a server's usable window
   is often well below its configured one (llama.cpp `--parallel 2` halves it per slot). Set it to your
-  model's real usable window; pair it with `--max-turn-output-chars` so one large `Read` can't
+  model's real usable window; pair it with `--max-turn-output-tokens` so one large `Read` can't
   overshoot the window in a single turn.
 
-- **`--max-turn-output-chars` — the per-turn tool-output budget.** The total a single turn may add
+- **`--max-turn-output-tokens` — the per-turn tool-output budget.** The total a single turn may add
   across *all* of its tool calls, not per result. This is the one the reserve is sized against, so it
-  is what keeps the final-answer turn sendable. Was `--max-tool-output-chars` /
-  `FC_MAX_TOOL_OUTPUT_CHARS`, whose name suggested it bounded one tool's output when it never did;
-  the old name still works and warns.
+  is what keeps the final-answer turn sendable.
 
-- **`--max-result-output-chars` — the per-result cap.** Bounds one tool result. **Off by default**,
+  **Raise it before you lower it.** Truncating a repo-exploration agent is self-defeating: the model
+  pages the same file back over several turns, spending the context the cap was protecting, and any
+  range it never pages back in is simply missing from the answer. The default is sized so that whole
+  source files usually arrive in one piece.
+
+  It is a **token** budget. It was a character budget under the `*_CHARS` names, which forced the
+  reserve to assume one token per character (CJK really does tokenize that densely) and so held back
+  ~4x what a turn of ASCII source actually costs. Those names are converted with a warning, at the
+  ASCII ratio they were chosen against — so a config saying `16000` chars becomes ~5300 tokens.
+
+- **`--max-result-output-tokens` — the per-result cap.** Bounds one tool result. **Off by default**,
   because the per-turn budget already protects the window; this only changes how that budget is
   *shared*. The turn budget is spent greedily in call order, so a model that issues a big `Read` and
   two `Grep`s in one turn can have the `Read` consume the entire allowance and get empty results for
   the greps — it asked three questions and got one answer. Setting this to roughly
-  `max_turn_output_chars ÷ expected calls per turn` gives every call in a turn room to survive.
+  `max_turn_output_tokens ÷ expected calls per turn` gives every call in a turn room to survive.
 
 A good default for a local llama.cpp preset serving 160k context with `--parallel 2`:
 
 ```bash
 export FC_MAX_CONTEXT=70000              # ~80k usable, minus headroom for the final turn
-export FC_MAX_TURN_OUTPUT_CHARS=16000    # per turn, across all its tool calls
-export FC_MAX_RESULT_OUTPUT_CHARS=6000   # optional: keep one big Read from starving the same turn's greps
+export FC_MAX_TURN_OUTPUT_TOKENS=8000     # tokens per turn, across all its tool calls
+# export FC_MAX_RESULT_OUTPUT_TOKENS=2500 # optional: keep one big Read from starving the same turn's greps
 ```
 
 ### Choosing `--max-turns`
@@ -315,11 +323,11 @@ budget rather than from a fixed rule:
 
 ```
 usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
-    reserve  =  required_reserve(max_turn_output_chars, max_tokens)
+    reserve  =  required_reserve(max_turn_output_tokens, max_tokens)
 ```
 
 The reserve is substantial — it holds back a full turn of tool output plus the completion so the
-final-answer request still fits. With `max_turn_output_chars=16000` and `max_tokens=4096` it is
+final-answer request still fits. With `max_turn_output_tokens=16000` and `max_tokens=4096` it is
 **26,315** tokens, and it does not shrink as the window does: it leaves **45,685** tokens to explore
 with at `max_context=72000` (the configuration measured below), but only ~43.7k at the `70000`
 suggested above — and nothing at all below ~26k, where every run would finalize on turn one.
@@ -346,7 +354,7 @@ been allowed to, so a higher cap costs latency, not correctness.
 
 Two caveats. Repo size barely predicts cost — a 10.8k-file repo burned 804 tokens/turn while a
 47k-file one converged in 6 turns; question shape dominates. And these numbers scale with *your*
-budget: halving `max_context`, or raising `max_turn_output_chars`, roughly halves the usable turns.
+budget: halving `max_context`, or raising `max_turn_output_tokens`, roughly halves the usable turns.
 
 ## Programmatic use
 

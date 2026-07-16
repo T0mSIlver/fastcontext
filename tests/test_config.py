@@ -24,9 +24,12 @@ _ENV_VARS = [
     "API_KEY",
     "FC_MAX_TOKENS",
     "FC_MAX_CONTEXT",
+    "FC_MAX_TURN_OUTPUT_TOKENS",
+    "FC_MAX_RESULT_OUTPUT_TOKENS",
+    "FC_MAX_TOOL_OUTPUT_CHARS",  # superseded -> FC_MAX_TURN_OUTPUT_TOKENS
     "FC_MAX_TURN_OUTPUT_CHARS",
     "FC_MAX_RESULT_OUTPUT_CHARS",
-    "FC_MAX_TOOL_OUTPUT_CHARS",  # renamed -> FC_MAX_TURN_OUTPUT_CHARS
+    "FC_MAX_TOOL_RESULT_CHARS",
     "FC_MAX_CITATIONS",
     "FC_CONTEXT_RESERVE",
     "FC_TEMPERATURE",
@@ -238,91 +241,107 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-# --- renamed settings --------------------------------------------------------
+# --- superseded settings -----------------------------------------------------
 #
-# `max_tool_output_chars` said "tool" but bounded a whole TURN. It is honored under its old name
-# rather than ignored: it is the cap the context reserve is sized against, so silently dropping it
-# would move that cap without telling anyone.
+# The output caps moved from characters to tokens. The old char names are converted (at the ASCII
+# ratio they were chosen against), not reused verbatim -- a char number used as a token budget would
+# roughly triple the cap -- and not ignored, since the turn cap is what the reserve is sized against.
 
 
-def _turn_chars(settings):
-    return settings.int_("max_turn_output_chars", "FC_MAX_TURN_OUTPUT_CHARS", 16000)
+def _turn_tokens(settings, default=6000):
+    return settings.int_("max_turn_output_tokens", "FC_MAX_TURN_OUTPUT_TOKENS", default)
 
 
-def test_renamed_config_key_is_honored_and_warns(tmp_path, capsys):
+def test_superseded_config_key_is_converted_and_warns(tmp_path, capsys):
     path = _write(tmp_path / "c.toml", "max_tool_output_chars = 5000\n")
     settings = load_settings(str(tmp_path), config_path=str(path))
-    assert _turn_chars(settings) == 5000
+    assert _turn_tokens(settings) == 1667  # 5000 chars / 3.0
     err = capsys.readouterr().err
-    assert "max_tool_output_chars" in err and "max_turn_output_chars" in err
+    assert "max_tool_output_chars" in err and "max_turn_output_tokens" in err
+    assert "TOKENS" in err and "1667" in err, "the warning must state the unit change and the value"
 
 
-def test_renamed_env_var_is_honored_and_warns(monkeypatch, tmp_path, capsys):
+def test_superseded_env_var_is_converted_and_warns(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
     settings = load_settings(str(tmp_path), config_path="/nonexistent")
-    assert _turn_chars(settings) == 7000
+    assert _turn_tokens(settings) == 2333  # 7000 chars / 3.0
     err = capsys.readouterr().err
-    assert "FC_MAX_TOOL_OUTPUT_CHARS" in err and "FC_MAX_TURN_OUTPUT_CHARS" in err
+    assert "FC_MAX_TOOL_OUTPUT_CHARS" in err and "FC_MAX_TURN_OUTPUT_TOKENS" in err
 
 
-def test_new_name_wins_over_the_old_one(monkeypatch, tmp_path):
-    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+def test_the_intermediate_char_name_is_also_converted(monkeypatch, tmp_path):
+    """max_turn_output_chars was the previous rename; it is a char name too, so it converts."""
     monkeypatch.setenv("FC_MAX_TURN_OUTPUT_CHARS", "9000")
     settings = load_settings(str(tmp_path), config_path="/nonexistent")
-    assert _turn_chars(settings) == 9000
+    assert _turn_tokens(settings) == 3000
 
 
-def test_new_name_in_a_file_beats_the_old_env_var(monkeypatch, tmp_path):
+def test_new_name_wins_over_the_superseded_one(monkeypatch, tmp_path):
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
+    monkeypatch.setenv("FC_MAX_TURN_OUTPUT_TOKENS", "9000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert _turn_tokens(settings) == 9000, "a token value must never be reinterpreted"
+
+
+def test_new_name_in_a_file_beats_the_superseded_env_var(monkeypatch, tmp_path):
     """Adopting the new name anywhere overrides a stale old one rather than fighting it."""
     monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
-    path = _write(tmp_path / "c.toml", "max_turn_output_chars = 9000\n")
+    path = _write(tmp_path / "c.toml", "max_turn_output_tokens = 9000\n")
     settings = load_settings(str(tmp_path), config_path=str(path))
-    assert _turn_chars(settings) == 9000
+    assert _turn_tokens(settings) == 9000
 
 
 def test_no_warning_when_only_the_new_name_is_used(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("FC_MAX_TURN_OUTPUT_CHARS", "9000")
+    monkeypatch.setenv("FC_MAX_TURN_OUTPUT_TOKENS", "9000")
     settings = load_settings(str(tmp_path), config_path="/nonexistent")
-    assert _turn_chars(settings) == 9000
+    assert _turn_tokens(settings) == 9000
     assert "deprecated" not in capsys.readouterr().err
 
 
-def test_rename_warning_is_emitted_once(monkeypatch, tmp_path, capsys):
+def test_warning_is_emitted_once(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "7000")
     settings = load_settings(str(tmp_path), config_path="/nonexistent")
-    _turn_chars(settings)
-    _turn_chars(settings)
+    _turn_tokens(settings)
+    _turn_tokens(settings)
     assert capsys.readouterr().err.count("deprecated") == 1
+
+
+def test_result_cap_char_name_is_converted_too(monkeypatch, tmp_path):
+    monkeypatch.setenv("FC_MAX_RESULT_OUTPUT_CHARS", "6000")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert settings.int_("max_result_output_tokens", "FC_MAX_RESULT_OUTPUT_TOKENS", 0) == 2000
+
+
+def test_unparsable_superseded_value_falls_through_to_the_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("FC_MAX_TOOL_OUTPUT_CHARS", "not-a-number")
+    settings = load_settings(str(tmp_path), config_path="/nonexistent")
+    assert _turn_tokens(settings) == 6000
 
 
 def test_starter_config_offers_the_new_names_only():
     rendered = render_starter_config(env={})
-    assert "max_turn_output_chars" in rendered
-    assert "max_result_output_chars" in rendered
-    assert "max_tool_output_chars" not in rendered
+    assert "max_turn_output_tokens" in rendered
+    assert "max_result_output_tokens" in rendered
+    assert "_chars" not in rendered
 
 
-def test_renamed_kwarg_is_adopted_not_swallowed(capsys):
-    """A programmatic caller passing the old name must not silently land on the default cap.
-
-    `make_fastcontext_agent(max_tool_output_chars=...)` would otherwise fall into **kwargs and be
-    dropped -- the same "moves the cap without telling anyone" failure the env/file shim prevents.
-    """
+def test_superseded_kwarg_is_converted_not_swallowed(capsys):
+    """A programmatic caller passing the old name must not silently land on the default cap."""
     overrides = config.adopt_renamed_overrides(
-        {"max_turn_output_chars": None}, {"max_tool_output_chars": 5000}
+        {"max_turn_output_tokens": None}, {"max_tool_output_chars": 5000}
     )
-    assert overrides["max_turn_output_chars"] == 5000
+    assert overrides["max_turn_output_tokens"] == 1667
     assert "deprecated" in capsys.readouterr().err
 
 
-def test_explicit_new_kwarg_beats_the_renamed_one(capsys):
+def test_explicit_new_kwarg_beats_the_superseded_one():
     overrides = config.adopt_renamed_overrides(
-        {"max_turn_output_chars": 9000}, {"max_tool_output_chars": 5000}
+        {"max_turn_output_tokens": 9000}, {"max_tool_output_chars": 5000}
     )
-    assert overrides["max_turn_output_chars"] == 9000
+    assert overrides["max_turn_output_tokens"] == 9000
 
 
-def test_adopt_renamed_overrides_is_a_noop_without_the_old_name(capsys):
-    overrides = config.adopt_renamed_overrides({"max_turn_output_chars": None}, {"other": 1})
-    assert overrides == {"max_turn_output_chars": None}
+def test_adopt_renamed_overrides_is_a_noop_without_an_old_name(capsys):
+    overrides = config.adopt_renamed_overrides({"max_turn_output_tokens": None}, {"other": 1})
+    assert overrides == {"max_turn_output_tokens": None}
     assert "deprecated" not in capsys.readouterr().err
