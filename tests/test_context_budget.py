@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastcontext.agent.agent import Agent
 from fastcontext.agent.budget import (
-    DEFAULT_MAX_TURN_OUTPUT_CHARS,
+    DEFAULT_MAX_TURN_OUTPUT_TOKENS,
     ContextBudget,
     cap_tool_output,
     cap_turn_outputs,
@@ -48,11 +48,11 @@ def test_reserve_survives_a_full_turn_of_non_ascii_output():
     # The reserve is sized in CHARACTERS of tool output, so it must assume worst-case token
     # density -- otherwise a single CJK-heavy turn overshoots the window after the budget trips.
     max_context, max_completion = 80_128, 4_096
-    reserve = required_reserve(DEFAULT_MAX_TURN_OUTPUT_CHARS, max_completion)
+    reserve = required_reserve(DEFAULT_MAX_TURN_OUTPUT_TOKENS, max_completion)
 
     budget = ContextBudget(max_context=max_context, reserve=reserve)
     budget.record_usage({"prompt_tokens": budget.limit - 1}, 0)  # worst case: 1 token under
-    worst = cap_turn_outputs(["内" * 50_000], DEFAULT_MAX_TURN_OUTPUT_CHARS)
+    worst = cap_turn_outputs(["内" * 50_000], DEFAULT_MAX_TURN_OUTPUT_TOKENS)
     tail = [{"role": "tool", "content": o} for o in worst]
 
     projected = budget.projected_tokens(tail)
@@ -101,14 +101,14 @@ async def test_toolset_caps_an_oversized_read():
         big = Path(tmp) / "big.py"
         big.write_text("\n".join("x" * 200 for _ in range(1000)), encoding="utf-8")
 
-        toolset = ToolSet([ReadTool()], work_dir=tmp, max_turn_output_chars=5_000)
+        toolset = ToolSet([ReadTool()], work_dir=tmp, max_turn_output_tokens=5_000)
         msg = Message(
             role="assistant",
             content="",
             tool_calls=[FunctionCall(id="1", name="Read", arguments=json.dumps({"path": str(big)}))],
         )
         results = await toolset.call(msg)
-        assert len(results[0].content) < 6_000
+        assert estimate_tokens(results[0].content) < 6_000
         assert "Output truncated" in results[0].content
 
 
@@ -117,8 +117,9 @@ def test_cap_turn_outputs_bounds_the_whole_turn_not_just_each_result():
     # per-result cap would still add N x cap to the prompt in a single step.
     # "@" cannot occur in the truncation notice, so counting it measures payload only.
     outputs = ["@" * 30_000] * 4
-    capped = cap_turn_outputs(outputs, limit=30_000)
-    assert sum(c.count("@") for c in capped) <= 30_000, "a turn must not exceed its total allowance"
+    capped = cap_turn_outputs(outputs, limit=10_000)
+    payload = "".join("@" * c.count("@") for c in capped)
+    assert estimate_tokens(payload) <= 10_000, "a turn must not exceed its total allowance"
     assert "Output truncated" in capped[1]
 
 
@@ -132,7 +133,7 @@ def test_cap_turn_outputs_spends_the_allowance_greedily():
 def test_cap_turn_outputs_truncates_fully_once_exhausted():
     # Regression: cap_tool_output() treats limit=0 as "no cap", so an exhausted allowance
     # must not be delegated to it -- that would let the rest of the turn through untouched.
-    capped = cap_turn_outputs(["a" * 4_000, "b" * 4_000], limit=5_000)
+    capped = cap_turn_outputs(["a" * 4_000, "b" * 4_000], limit=1_500)
     assert capped[0].count("a") > 0, "the first result should get most of the allowance"
     assert capped[1].count("b") < 4_000, "second result must not pass through in full"
     assert "Output truncated" in capped[1]
@@ -143,9 +144,9 @@ def test_cap_turn_outputs_total_stays_under_limit_for_many_calls():
     # calls would drift past the ceiling the reserve was sized against, so the notices must be
     # charged against the allowance too.
     for n_calls in (1, 4, 10, 30):
-        capped = cap_turn_outputs(["@" * 50_000] * n_calls, limit=16_000)
-        total = sum(len(c) for c in capped)
-        assert total <= 16_000, f"{n_calls} calls produced {total} chars, over the 16,000 allowance"
+        capped = cap_turn_outputs(["@" * 50_000] * n_calls, limit=6_000)
+        total = sum(estimate_tokens(c) for c in capped)
+        assert total <= 6_000, f"{n_calls} calls produced {total} tokens, over the 6,000 allowance"
 
 
 def test_cap_turn_outputs_disabled_with_zero():
@@ -157,12 +158,12 @@ def test_reserve_absorbs_a_full_turn_so_the_finalize_request_still_fits():
     # turn of tool output plus the completion -- otherwise the final-answer request itself
     # would exceed the window and the run would die anyway.
     max_context, max_completion = 80_128, 4_096
-    reserve = required_reserve(DEFAULT_MAX_TURN_OUTPUT_CHARS, max_completion)
+    reserve = required_reserve(DEFAULT_MAX_TURN_OUTPUT_TOKENS, max_completion)
 
     for n_calls in (1, 4, 10):
         budget = ContextBudget(max_context=max_context, reserve=reserve)
         budget.record_usage({"prompt_tokens": budget.limit - 1}, 0)  # worst case: 1 token under
-        outputs = cap_turn_outputs(["x" * 30_000] * n_calls, DEFAULT_MAX_TURN_OUTPUT_CHARS)
+        outputs = cap_turn_outputs(["x" * 30_000] * n_calls, DEFAULT_MAX_TURN_OUTPUT_TOKENS)
         tail = [{"role": "tool", "content": o} for o in outputs]
 
         projected = budget.projected_tokens(tail)
@@ -264,7 +265,7 @@ async def test_agent_finalizes_instead_of_overflowing():
         answer = Message(role="assistant", content=f"<final_answer>\n{src}:1-5 (why)\n</final_answer>")
         llm = _ScriptedLLM(replies=[_read_call(str(src)), answer], prompt_tokens=[9_500, 9_800])
 
-        toolset = ToolSet([ReadTool()], work_dir=tmp, max_turn_output_chars=30_000)
+        toolset = ToolSet([ReadTool()], work_dir=tmp, max_turn_output_tokens=30_000)
         agent = Agent(
             name="t",
             system_prompt="sys",
@@ -310,7 +311,7 @@ async def test_agent_drops_tools_if_the_server_ignores_tool_choice_none():
             name="t",
             system_prompt="sys",
             llm=llm,
-            toolset=ToolSet([ReadTool()], work_dir=tmp, max_turn_output_chars=30_000),
+            toolset=ToolSet([ReadTool()], work_dir=tmp, max_turn_output_tokens=30_000),
             trajectory_file=traj,
             work_dir=tmp,
             budget=ContextBudget(max_context=10_000, reserve=1_000),
@@ -347,7 +348,7 @@ async def test_no_citation_corrections_once_finalizing():
             name="t",
             system_prompt="sys",
             llm=llm,
-            toolset=ToolSet([ReadTool()], work_dir=tmp, max_turn_output_chars=16_000),
+            toolset=ToolSet([ReadTool()], work_dir=tmp, max_turn_output_tokens=16_000),
             trajectory_file=traj,
             work_dir=tmp,
             budget=ContextBudget(max_context=10_000, reserve=1_000),

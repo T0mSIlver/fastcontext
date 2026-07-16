@@ -5,6 +5,10 @@ from pathlib import Path
 from .tool import Tool
 from .utils import RG_PATH, resolve_path
 
+# Paths a Glob returns. Like Grep's head limit this is a runaway guard, not the real bound: the
+# per-turn token budget is. 100 was low enough to hide files the run had room to see.
+DEFAULT_GLOB_LIMIT = 1000
+
 
 def run(directory: str, pattern: str, cwd: str) -> str:
     command = [RG_PATH, "--files", directory, "--glob", pattern, "--sort", "modified"]
@@ -56,7 +60,7 @@ class GlobTool(Tool):
 
         output = run(directory, pattern, cwd=cwd)
 
-        limit = 100
+        limit = DEFAULT_GLOB_LIMIT
         matched_files = output.splitlines()
         if len(matched_files) > limit:
             matched_files = matched_files[:limit]

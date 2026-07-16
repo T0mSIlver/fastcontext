@@ -54,23 +54,23 @@ class ToolSet:
         self,
         tools: list[Tool],
         work_dir: str,
-        max_turn_output_chars: int = 0,
-        max_result_output_chars: int = 0,
+        max_turn_output_tokens: int = 0,
+        max_result_output_tokens: int = 0,
     ):
         self._tool_dict = {tool.name: tool for tool in tools}
         self.work_dir = work_dir
         # Two distinct bounds, both in characters; 0 disables either.
         #
-        # `max_turn_output_chars` is the budget for the WHOLE turn. It is what the context reserve is
+        # `max_turn_output_tokens` is the budget for the WHOLE turn. It is what the context reserve is
         # sized against, so it is the one that keeps the final-answer turn sendable. A single Read can
         # otherwise return 2000 lines x 500 chars (~250k tokens), enough to blow past any context
         # window in one call and leave no room to even ask for an answer.
-        self.max_turn_output_chars = max_turn_output_chars
-        # `max_result_output_chars` bounds ONE result. The turn budget alone is spent greedily in call
+        self.max_turn_output_tokens = max_turn_output_tokens
+        # `max_result_output_tokens` bounds ONE result. The turn budget alone is spent greedily in call
         # order, so a single huge result can consume all of it and starve the later calls of the same
         # turn -- the model asked three questions and gets one answer. Capping each result first gives
         # every call in the turn a chance to survive.
-        self.max_result_output_chars = max_result_output_chars
+        self.max_result_output_tokens = max_result_output_tokens
 
     def schema_list(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tool_dict.values()]
@@ -122,8 +122,8 @@ class ToolSet:
         # Per result first, so one oversized result cannot eat the whole turn's allowance and starve
         # the calls after it; then the turn total, because N results each just under the per-result
         # cap still add N x cap to the prompt in one step.
-        outputs = [cap_tool_output(tr.output, self.max_result_output_chars) for tr in tool_results]
-        outputs = cap_turn_outputs(outputs, self.max_turn_output_chars)
+        outputs = [cap_tool_output(tr.output, self.max_result_output_tokens) for tr in tool_results]
+        outputs = cap_turn_outputs(outputs, self.max_turn_output_tokens)
         tools_result_messages = []
         for tr, output in zip(tool_results, outputs):
             tools_result_messages.append(
