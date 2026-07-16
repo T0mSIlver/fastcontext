@@ -300,3 +300,29 @@ def test_starter_config_offers_the_new_names_only():
     assert "max_turn_output_chars" in rendered
     assert "max_result_output_chars" in rendered
     assert "max_tool_output_chars" not in rendered
+
+
+def test_renamed_kwarg_is_adopted_not_swallowed(capsys):
+    """A programmatic caller passing the old name must not silently land on the default cap.
+
+    `make_fastcontext_agent(max_tool_output_chars=...)` would otherwise fall into **kwargs and be
+    dropped -- the same "moves the cap without telling anyone" failure the env/file shim prevents.
+    """
+    overrides = config.adopt_renamed_overrides(
+        {"max_turn_output_chars": None}, {"max_tool_output_chars": 5000}
+    )
+    assert overrides["max_turn_output_chars"] == 5000
+    assert "deprecated" in capsys.readouterr().err
+
+
+def test_explicit_new_kwarg_beats_the_renamed_one(capsys):
+    overrides = config.adopt_renamed_overrides(
+        {"max_turn_output_chars": 9000}, {"max_tool_output_chars": 5000}
+    )
+    assert overrides["max_turn_output_chars"] == 9000
+
+
+def test_adopt_renamed_overrides_is_a_noop_without_the_old_name(capsys):
+    overrides = config.adopt_renamed_overrides({"max_turn_output_chars": None}, {"other": 1})
+    assert overrides == {"max_turn_output_chars": None}
+    assert "deprecated" not in capsys.readouterr().err

@@ -83,6 +83,28 @@ def _warn_renamed(old: str, new: str) -> None:
     )
 
 
+def warn_renamed_flag(old_flag: str, new_flag: str) -> None:
+    """Announce a deprecated CLI spelling. argparse resolves an option alias silently, so without
+    this the flag form would be the one old name that changes a cap without saying so."""
+    _warn_renamed(old_flag, new_flag)
+
+
+def adopt_renamed_overrides(overrides: dict[str, Any], kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Move a renamed setting passed under its old name onto its new key.
+
+    A programmatic caller passing ``max_tool_output_chars=`` would otherwise have it swallowed by
+    ``**kwargs`` and silently ignored -- landing on the default cap instead of the one they asked
+    for. That is the same "moves the cap without telling anyone" failure the env/file shim exists to
+    prevent, so it is closed the same way. An explicit new-name value always wins.
+    """
+    for old, new in _RENAMED_KEYS.items():
+        value = kwargs.get(old)
+        if value is not None and overrides.get(new) is None:
+            _warn_renamed(old, new)
+            overrides[new] = value
+    return overrides
+
+
 def user_config_path() -> Path:
     """`$XDG_CONFIG_HOME/fastcontext/config.toml` (default `~/.config/...`)."""
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")

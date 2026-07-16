@@ -7,6 +7,10 @@ from pathlib import Path
 
 from fastcontext.agent.agent import AgentRunError
 from fastcontext.agent.agent_factory import make_fastcontext_agent
+from fastcontext.agent.config import warn_renamed_flag
+
+# Kept as an alias of --max-turn-output-chars; it never bounded a single tool's output.
+_DEPRECATED_TURN_FLAG = "--max-tool-output-chars"
 
 
 def _run_init(args) -> int:
@@ -87,7 +91,7 @@ def main():
         "--max-turn-output-chars",
         # Deprecated alias: the old name said "tool" but bounded a whole turn, which is the confusion
         # the rename removes. Still accepted so existing invocations keep working.
-        "--max-tool-output-chars",
+        _DEPRECATED_TURN_FLAG,
         dest="max_turn_output_chars",
         type=int,
         default=None,
@@ -136,6 +140,11 @@ def main():
 
     if args.command == "init":
         raise SystemExit(_run_init(args))
+
+    # argparse resolves an option alias silently, so the old flag would otherwise be the one spelling
+    # that moves a cap without saying so -- the env var and config key both announce themselves.
+    if any(a == _DEPRECATED_TURN_FLAG or a.startswith(f"{_DEPRECATED_TURN_FLAG}=") for a in sys.argv[1:]):
+        warn_renamed_flag(_DEPRECATED_TURN_FLAG, "--max-turn-output-chars")
 
     work_dir = os.getcwd()
     agent = make_fastcontext_agent(

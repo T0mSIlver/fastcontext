@@ -1,4 +1,4 @@
-"""The per-result cap (--max-tool-result-chars) and how it composes with the per-turn budget.
+"""The per-result cap (--max-result-output-chars) and how it composes with the per-turn budget.
 
 The turn budget is spent greedily in call order, so one oversized result can consume all of it and
 leave the later calls of the same turn with nothing. The per-result cap bounds each result first so

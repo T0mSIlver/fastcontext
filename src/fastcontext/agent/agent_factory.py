@@ -6,7 +6,7 @@ from fastcontext.agent.budget import (
     ContextBudget,
     required_reserve,
 )
-from fastcontext.agent.config import load_settings
+from fastcontext.agent.config import adopt_renamed_overrides, load_settings
 from fastcontext.agent.llm import LLM, resolve_max_tokens
 from fastcontext.agent.tool.tool import ToolSet
 from fastcontext.agent.tool.utils import RG_PATH
@@ -45,7 +45,7 @@ def make_fastcontext_agent(
     # coding agent driving this over bash) need not re-declare them on each invocation.
     settings = load_settings(
         work_dir,
-        overrides={key: kwargs.get(key) for key in _OVERRIDE_KEYS},
+        overrides=adopt_renamed_overrides({key: kwargs.get(key) for key in _OVERRIDE_KEYS}, kwargs),
         config_path=kwargs.get("config_path"),
     )
 
