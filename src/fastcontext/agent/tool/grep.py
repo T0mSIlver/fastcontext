@@ -157,6 +157,11 @@ def run_rg(rg_path: str, pattern: str, path: str, **kwargs) -> str:
     command.append("--heading")
     command.append("--color")
     command.append("never")
+    # rg omits the filename when the search target is a single explicit file, so a Read-then-Grep on
+    # one file came back as bare `12:match` with the path nowhere in the output -- the model then has
+    # to remember which file it asked about in order to cite it. Force the heading in every mode so
+    # every result carries the path it belongs to.
+    command.append("--with-filename")
 
     cwd = kwargs.get("cwd", str(Path.cwd()))
 

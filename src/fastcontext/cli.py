@@ -88,8 +88,19 @@ def main():
         type=int,
         default=None,
         help=(
-            "truncate a single tool result above this many characters (0 disables). Guards against "
-            "one Read exhausting the whole window. Overrides FC_MAX_TOOL_OUTPUT_CHARS."
+            "total characters of tool output ONE TURN may add, across all of its tool calls "
+            "(0 disables). Guards against a turn exhausting the whole window; the context reserve is "
+            "sized against it. Overrides FC_MAX_TOOL_OUTPUT_CHARS."
+        ),
+    )
+    parser.add_argument(
+        "--max-tool-result-chars",
+        type=int,
+        default=None,
+        help=(
+            "truncate a SINGLE tool result above this many characters (0 disables, the default). "
+            "The turn budget is spent in call order, so one huge result can starve the later calls "
+            "of that turn; this caps each result first. Overrides FC_MAX_TOOL_RESULT_CHARS."
         ),
     )
     parser.add_argument(
@@ -126,6 +137,7 @@ def main():
         max_tokens=args.max_tokens,
         max_context=args.max_context,
         max_tool_output_chars=args.max_tool_output_chars,
+        max_tool_result_chars=args.max_tool_result_chars,
         max_citations=args.max_citations,
         verbose=args.verbose,
         config_path=args.config,
