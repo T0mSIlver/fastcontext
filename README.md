@@ -253,7 +253,7 @@ fastcontext -q "<query>" [options]
 | --- | --- |
 | `--query`, `-q` | Natural-language exploration request (required). |
 | `--traj`, `-t` | JSONL trajectory output path (default: `.fastcontext/trajectory_<timestamp>.jsonl`). |
-| `--max-turns` | Maximum exploration turns before the agent is forced to answer (default `4`). |
+| `--max-turns` | Maximum exploration turns before the agent is forced to answer (default `4`; see [Choosing `--max-turns`](#choosing---max-turns) — `12` suits most real explorations). |
 | `--citation` | Print only the `<final_answer>` block — the machine-readable path. |
 | `--tui` | Watch the run in the collapsible Textual TUI. |
 | `--verbose` | Print runtime info and each turn to the terminal. |
@@ -288,6 +288,47 @@ A good default for a local llama.cpp preset serving 160k context with `--paralle
 export FC_MAX_CONTEXT=70000        # ~80k usable, minus headroom for the final turn
 export FC_MAX_TOOL_OUTPUT_CHARS=16000
 ```
+
+### Choosing `--max-turns`
+
+The turn cap is a bound on the worst case, not a target: an exploration stops as soon as it has the
+answer. What actually limits a long run is context, so the affordable number of turns follows from the
+budget rather than from a fixed rule:
+
+```
+usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
+    reserve  =  required_reserve(max_tool_output_chars, max_tokens)
+```
+
+The reserve is substantial — it holds back a full turn of tool output plus the completion so the
+final-answer request still fits. With `max_tool_output_chars=16000` and `max_tokens=4096` it is
+**26,315** tokens, and it does not shrink as the window does: it leaves **45,685** tokens to explore
+with at `max_context=72000` (the configuration measured below), but only ~43.7k at the `70000`
+suggested above — and nothing at all below ~26k, where every run would finalize on turn one.
+
+**Measured** — 12 runs over 6 repos (186 to 47k source files), easy lookups and hard multi-module
+traces, each at `--max-turns 16` against `fastcontext-1.0-4b-rl-q8_0` on llama.cpp
+(`--ctx-size 160000 --parallel 2`, ~80k usable per slot):
+
+| Metric | Result |
+| --- | --- |
+| Tokens per turn | **~2.0k median**, 786 min, 4.1k max |
+| Peak prompt size | 14.6k – 46.9k (median ~25k) |
+| Turns when the agent answered on its own | 5, 6, 9, 10, 13 (median ~9) |
+| Runs that used all 16 turns | 6 / 12 |
+| Runs the budget stopped early | 1 / 12 (a `llama.cpp` KV-cache trace, finalized at turn 13) |
+| Runs returning a usable answer | 12 / 12 |
+
+At the median burn rate the 45,685-token allowance covers ~23 turns; at the heaviest sustained rate
+observed (3.4k/turn) it covers ~13 — which is where the one budget-limited run finalized, and it still
+answered correctly. So **`--max-turns 12`** stays inside the context budget in every case measured,
+and `16` is a reasonable ceiling for hard traces. `4` and `8` cut exploration short on over half the
+runs. Note the cap is not a promise of sufficiency: 6 runs would have kept exploring past 16 had they
+been allowed to, so a higher cap costs latency, not correctness.
+
+Two caveats. Repo size barely predicts cost — a 10.8k-file repo burned 804 tokens/turn while a
+47k-file one converged in 6 turns; question shape dominates. And these numbers scale with *your*
+budget: halving `max_context`, or raising `max_tool_output_chars`, roughly halves the usable turns.
 
 ## Programmatic use
 
