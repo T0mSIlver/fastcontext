@@ -240,6 +240,27 @@ def test_format_citations_validates_relative_path_against_cwd(tmp_path):
     assert "alpha.py:1-3 (relative)" in out
 
 
+def test_format_citations_caps_to_max_citations(tmp_path):
+    repo = _repo(tmp_path)
+    f = repo / "alpha.py"
+    body = "\n".join(f"{f}:{n}-{n} (c{n})" for n in range(1, 11))  # 10 citations
+    text = f"<final_answer>\n{body}\n</final_answer>"
+    out = format_citations(parse_citations(text), validate=False, max_citations=3)
+    # The model's order is preserved and only the first 3 survive.
+    assert out.count(str(f)) == 3
+    assert "(c1)" in out and "(c3)" in out
+    assert "(c4)" not in out
+
+
+def test_format_citations_cap_zero_is_unlimited(tmp_path):
+    repo = _repo(tmp_path)
+    f = repo / "alpha.py"
+    body = "\n".join(f"{f}:{n}-{n}" for n in range(1, 6))
+    text = f"<final_answer>\n{body}\n</final_answer>"
+    out = format_citations(parse_citations(text), validate=False, max_citations=0)
+    assert out.count(str(f)) == 5
+
+
 # --- end-to-end correction loop ----------------------------------------------
 
 
@@ -256,7 +277,7 @@ class _FakeLLM:
         return self.scripted.pop(0)
 
 
-def _agent(tmp_path, scripted):
+def _agent(tmp_path, scripted, max_citations=0):
     repo = _repo(tmp_path)
     toolset = ToolSet([ReadTool(), GrepTool(), GlobTool()], work_dir=str(repo))
     agent = Agent(
@@ -266,6 +287,7 @@ def _agent(tmp_path, scripted):
         toolset=toolset,
         trajectory_file=str(tmp_path / "traj" / "t.jsonl"),
         work_dir=str(repo),
+        max_citations=max_citations,
     )
     return agent, repo
 
@@ -286,6 +308,17 @@ def test_single_file_grep_citation_survives(tmp_path):
     result = asyncio.run(agent.run("q", citation=True))
     assert f"{target}:3-5 (the target)" in result
     assert agent.llm.calls == 2  # no correction round was needed
+
+
+def test_agent_applies_the_citation_cap(tmp_path):
+    repo = tmp_path / "repo"
+    target = Path(repo) / "alpha.py"
+    read = _tool_call("Read", {"path": str(target)})  # observes lines 1-6
+    body = "\n".join(f"{target}:{n}-{n} (c{n})" for n in range(1, 7))  # 6 verified citations
+    agent, repo = _agent(tmp_path, [read, _final(body)], max_citations=2)
+    result = asyncio.run(agent.run("q", citation=True))
+    assert "(c1)" in result and "(c2)" in result
+    assert "(c3)" not in result
 
 
 def test_hallucinated_citation_is_dropped_after_corrections(tmp_path):

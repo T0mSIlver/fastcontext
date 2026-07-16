@@ -94,7 +94,11 @@ def parse_citations(text: str) -> list:
 
 
 def format_citations(
-    citations: list, validate: bool = True, observed: dict | None = None, cwd: str | None = None
+    citations: list,
+    validate: bool = True,
+    observed: dict | None = None,
+    cwd: str | None = None,
+    max_citations: int = 0,
 ) -> str:
 
     if validate:
@@ -117,6 +121,12 @@ def format_citations(
         # worse than a missing one.
         citations = [c for c in citations if citation_observed(observed, c, cwd)]
 
+    # Bound the answer size. This is a safety cap on a runaway/hallucinated list (the model inventing
+    # dozens of paths), not a relevance filter -- citations are unranked, so the model's own order is
+    # kept and the first `max_citations` survive. 0 disables the cap.
+    if max_citations and len(citations) > max_citations:
+        citations = citations[:max_citations]
+
     formatted = []
     for c in citations:
         if c["explanation"]:
@@ -126,9 +136,11 @@ def format_citations(
     return "<final_answer>\n" + "\n".join(formatted) + "\n</final_answer>"
 
 
-def get_final_answer(text: str, observed: dict | None = None, cwd: str | None = None) -> str:
+def get_final_answer(
+    text: str, observed: dict | None = None, cwd: str | None = None, max_citations: int = 0
+) -> str:
     citations = parse_citations(text)
-    final_answer = format_citations(citations, observed=observed, cwd=cwd)
+    final_answer = format_citations(citations, observed=observed, cwd=cwd, max_citations=max_citations)
     return final_answer
 
 

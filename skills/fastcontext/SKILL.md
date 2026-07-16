@@ -54,6 +54,7 @@ Parse the `path:line-range` entries and **read only those spans** — that's the
 ## Notes
 
 - **stdout = answer, stderr = diagnostics.** Read stdout; ignore stderr.
-- Cited ranges are validated — line ranges the model never actually opened are dropped, so what you get is safe to open directly.
+- Treat cited ranges as **candidate evidence, not ground truth.** Ranges the model never opened are dropped, but it can still cite a real file at the wrong lines — open each span and confirm it actually answers your question before relying on it.
+- The answer holds at most ~25 citations (a safety cap); ask a narrower question if you need more.
 - **A nonzero exit code means the run failed** (e.g. the endpoint was unreachable); the error is on stderr and stdout stays empty. Exit `0` with a `<final_answer>` block is a good run — retry or fall back to manual exploration only on a nonzero exit.
 - Ask specific questions; run several queries for a multi-part investigation.
