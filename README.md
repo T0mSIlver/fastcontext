@@ -112,7 +112,8 @@ flags. Only the model and endpoint are required.
 | `FC_TEMPERATURE` | — | `0.7` | Sampling temperature. |
 | `FC_MAX_TOKENS` | — | `auto` → `4096` | Completion cap per response. An integer, or `auto` to detect the model's context length from the provider. |
 | `FC_MAX_CONTEXT` | — | `0` (off) | Usable context window in tokens; the budget finalizes the run before it overruns. `0` disables the budget. |
-| `FC_MAX_TOOL_OUTPUT_CHARS` | — | `16000` | Truncate a single tool result above this many characters (`0` disables). |
+| `FC_MAX_TOOL_OUTPUT_CHARS` | — | `16000` | Total characters of tool output one **turn** may add, across all its tool calls (`0` disables). The reserve is sized against it. |
+| `FC_MAX_TOOL_RESULT_CHARS` | — | `0` (off) | Truncate a **single** tool result above this many characters (`0` disables). Stops one big result eating the whole turn budget. |
 | `FC_MAX_CITATIONS` | — | `25` | Cap the number of citations in the final answer; a safety bound on a runaway list (`0` disables). |
 | `FC_CONTEXT_RESERVE` | — | auto | Tokens held back from the budget for one turn of tool output + the completion. |
 | `FC_REASONING_EFFORT` | — | — | Passed through to servers that support it (`none`/`low`/`medium`/`high`/`max`). |
@@ -140,7 +141,8 @@ api_key  = "dummy"                 # omit if your endpoint needs no auth
 # optional tuning
 max_tokens = "auto"                # int, or "auto" to detect from the provider
 max_context = 70000                # usable window; enables the context budget
-max_tool_output_chars = 16000
+max_tool_output_chars = 16000      # per-TURN total, across all of a turn's tool calls
+max_tool_result_chars = 0          # per-RESULT cap; 0 = off (see Sizing tokens below)
 max_citations = 25                 # safety cap on the final answer's citation count (0 disables)
 reasoning_effort = "none"
 temperature = 0.0
@@ -259,7 +261,8 @@ fastcontext -q "<query>" [options]
 | `--verbose` | Print runtime info and each turn to the terminal. |
 | `--max-tokens` | Completion cap per response: an integer, or `auto` to detect from the provider. Overrides `FC_MAX_TOKENS`. |
 | `--max-context` | Usable context window in tokens; the budget finalizes before overrunning it. `0` disables. Overrides `FC_MAX_CONTEXT`. |
-| `--max-tool-output-chars` | Truncate any single tool result above this size (`0` disables). Overrides `FC_MAX_TOOL_OUTPUT_CHARS`. |
+| `--max-tool-output-chars` | Total tool output one **turn** may add, across all its calls (`0` disables). Overrides `FC_MAX_TOOL_OUTPUT_CHARS`. |
+| `--max-tool-result-chars` | Truncate a **single** tool result above this size (`0` disables, the default). Overrides `FC_MAX_TOOL_RESULT_CHARS`. |
 | `--max-citations` | Cap the number of citations in the final answer; a safety bound (`0` disables). Overrides `FC_MAX_CITATIONS` (default `25`). |
 | `--config` | Path to a TOML config file. Overrides `FC_CONFIG` and config-file discovery. |
 
@@ -282,11 +285,23 @@ Two independent knobs control token limits; both matter for reliable runs:
   model's real usable window; pair it with `--max-tool-output-chars` so one large `Read` can't
   overshoot the window in a single turn.
 
+- **`--max-tool-output-chars` — the per-turn tool-output budget.** The total a single turn may add
+  across *all* of its tool calls, not per result. This is the one the reserve is sized against, so it
+  is what keeps the final-answer turn sendable.
+
+- **`--max-tool-result-chars` — the per-result cap.** Bounds one tool result. **Off by default**,
+  because the per-turn budget already protects the window; this only changes how that budget is
+  *shared*. The turn budget is spent greedily in call order, so a model that issues a big `Read` and
+  two `Grep`s in one turn can have the `Read` consume the entire allowance and get empty results for
+  the greps — it asked three questions and got one answer. Setting this to roughly
+  `max_tool_output_chars ÷ expected calls per turn` gives every call in a turn room to survive.
+
 A good default for a local llama.cpp preset serving 160k context with `--parallel 2`:
 
 ```bash
-export FC_MAX_CONTEXT=70000        # ~80k usable, minus headroom for the final turn
-export FC_MAX_TOOL_OUTPUT_CHARS=16000
+export FC_MAX_CONTEXT=70000            # ~80k usable, minus headroom for the final turn
+export FC_MAX_TOOL_OUTPUT_CHARS=16000  # per turn, across all its tool calls
+export FC_MAX_TOOL_RESULT_CHARS=6000   # optional: keep one big Read from starving the same turn's greps
 ```
 
 ### Choosing `--max-turns`

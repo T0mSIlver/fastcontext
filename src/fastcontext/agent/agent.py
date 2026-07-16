@@ -107,7 +107,11 @@ class Agent:
         while True:
             n_turn += 1
             if n_turn > max_turns + 1:
-                return f"No final answer after {max_turns} turns."
+                # The model kept calling tools even on the turn that explicitly asked for the final
+                # answer, so the run has no answer to give. That is a failed run, not a short one:
+                # returning this text would put it on stdout with exit 0, where a caller parsing the
+                # answer would read the apology as the finding.
+                raise AgentRunError(f"No final answer after {max_turns} turns.")
             if n_turn == max_turns + 1:
                 await self.context.add(
                     Message(

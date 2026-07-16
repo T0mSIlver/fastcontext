@@ -32,11 +32,10 @@ def _normalize(path: str, cwd: str | None) -> str:
 def _heading_path(line: str, cwd: str | None) -> str | None:
     """Return the normalized path of a Grep file heading, or None if the line is not one.
 
-    ripgrep only prints a heading when it searches more than one file, and the tool interleaves
-    non-path notes ("No matches found", truncation notes, ``<system-reminder>`` blocks) into the
-    same output. A line only counts as a heading if it resolves to an existing file inside the
-    workspace; this also disambiguates a heading such as ``2024-01-01.log`` from a numbered
-    content line.
+    The tool interleaves non-path notes ("No matches found", truncation notes,
+    ``<system-reminder>`` blocks) into the same output. A line only counts as a heading if it
+    resolves to an existing file inside the workspace; this also disambiguates a heading such as
+    ``2024-01-01.log`` from a numbered content line.
     """
     candidate = line.strip()
     if not candidate:
@@ -64,8 +63,10 @@ def record_grep(observed: ObservedLines, output: str, cwd: str | None = None, pa
     Both match lines (``n:``) and context lines (``n-``) count as observed, because the model can
     read a file's content through Grep context instead of the Read tool.
 
-    ``path`` is the Grep tool call's ``path`` argument. When it points at a single file, ripgrep
-    prints no heading at all, so the numbered lines must be attributed to that file.
+    ``path`` is the Grep tool call's ``path`` argument, used to seed the current file. The tool
+    passes ``--with-filename``, so its output carries a heading even for a single-file search; this
+    seed is the fallback for output that has no heading anyway -- a truncation cutting it away, or an
+    rg build that declines to print it.
     """
     current: str | None = None
     if path:

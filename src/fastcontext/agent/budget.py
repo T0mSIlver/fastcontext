@@ -49,10 +49,16 @@ _RESERVE_SLACK_TOKENS = 2048
 DEFAULT_MAX_TOOL_OUTPUT_CHARS = 16_000
 
 TRUNCATION_NOTICE = (
-    "\n<system-reminder>Output truncated: it exceeded the per-result limit of {limit} characters. "
+    "\n<system-reminder>Output truncated: it exceeded the {scope} limit of {limit} characters. "
     "Read a specific line range with the Read tool's offset/limit parameters, or narrow the search, "
     "to see the rest.</system-reminder>"
 )
+
+# The two caps truncate for different reasons, and the model can act on the difference: "this one
+# result was too big" means narrow this call, while "this turn's calls together were too big" means
+# ask for less at once. Labelling both "per-result" told it to fix the wrong thing.
+_RESULT_SCOPE = "per-result"
+_TURN_SCOPE = "per-turn total output"
 
 FINALIZE_MESSAGE = (
     "You are approaching the context limit, so this is your last turn: no further tool calls will be "
@@ -103,7 +109,7 @@ def cap_tool_output(output: str, limit: int) -> str:
     """
     if limit <= 0 or len(output) <= limit:
         return output
-    return output[:limit] + TRUNCATION_NOTICE.format(limit=limit)
+    return output[:limit] + TRUNCATION_NOTICE.format(limit=limit, scope=_RESULT_SCOPE)
 
 
 def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
@@ -120,7 +126,7 @@ def cap_turn_outputs(outputs: list[str], limit: int) -> list[str]:
     if limit <= 0:
         return list(outputs)
 
-    notice = TRUNCATION_NOTICE.format(limit=limit)
+    notice = TRUNCATION_NOTICE.format(limit=limit, scope=_TURN_SCOPE)
     # Every result may need a truncation notice, and the notices are not free. Set the payload
     # allowance aside for them up front so the turn's total stays under `limit` for ANY number of
     # tool calls -- otherwise a turn with many truncated calls appends one notice each and drifts
