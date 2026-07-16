@@ -50,13 +50,37 @@ _ENDPOINT_KEYS = (
 _TUNING_KEYS = (
     ("max_tokens", "FC_MAX_TOKENS", None),
     ("max_context", "FC_MAX_CONTEXT", None),
-    ("max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", None),
-    ("max_tool_result_chars", "FC_MAX_TOOL_RESULT_CHARS", None),
+    ("max_turn_output_chars", "FC_MAX_TURN_OUTPUT_CHARS", None),
+    ("max_result_output_chars", "FC_MAX_RESULT_OUTPUT_CHARS", None),
     ("max_citations", "FC_MAX_CITATIONS", None),
     ("context_reserve", "FC_CONTEXT_RESERVE", None),
     ("reasoning_effort", "FC_REASONING_EFFORT", None),
     ("temperature", "FC_TEMPERATURE", None),
 )
+
+# Renamed settings: old name -> new name. `max_tool_output_chars` said "tool" but bounded a whole
+# TURN, which is exactly the confusion the rename removes -- so the old name is still honored rather
+# than ignored: it is the cap the context reserve is sized against, and silently dropping it would
+# move that cap without telling anyone. The warning is what makes the change visible.
+_RENAMED_KEYS = {"max_tool_output_chars": "max_turn_output_chars"}
+_RENAMED_ENV = {"FC_MAX_TOOL_OUTPUT_CHARS": "FC_MAX_TURN_OUTPUT_CHARS"}
+_RENAMED_KEY_BY_NEW = {new: old for old, new in _RENAMED_KEYS.items()}
+_RENAMED_ENV_BY_NEW = {new: old for old, new in _RENAMED_ENV.items()}
+
+# Warn once per name per process; a per-run diagnostic repeated on every lookup is just noise.
+_WARNED: set[str] = set()
+
+
+def _warn_renamed(old: str, new: str) -> None:
+    if old in _WARNED:
+        return
+    _WARNED.add(old)
+    print(
+        f"warning: '{old}' is deprecated and will be removed; use '{new}'. It bounds the total tool "
+        f"output of one TURN, not of a single result -- for that, see the max_result_output_chars / "
+        f"FC_MAX_RESULT_OUTPUT_CHARS setting.",
+        file=sys.stderr,
+    )
 
 
 def user_config_path() -> Path:
@@ -97,7 +121,11 @@ class Settings:
         self._overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
 
     def raw(self, key: str, env: str, legacy_env: str | None = None) -> Any:
-        """The winning value for `key` before type coercion, or ``None``."""
+        """The winning value for `key` before type coercion, or ``None``.
+
+        A renamed setting's old name is consulted only after every tier of the new name has come up
+        empty, so adopting the new name anywhere overrides a stale old one rather than fighting it.
+        """
         if key in self._overrides:
             return self._overrides[key]
         value = os.getenv(env)
@@ -107,6 +135,17 @@ class Settings:
             return value
         if key in self._file:
             return self._file[key]
+
+        old_env = _RENAMED_ENV_BY_NEW.get(env)
+        if old_env:
+            value = os.getenv(old_env)
+            if value is not None:
+                _warn_renamed(old_env, env)
+                return value
+        old_key = _RENAMED_KEY_BY_NEW.get(key)
+        if old_key and old_key in self._file:
+            _warn_renamed(old_key, key)
+            return self._file[old_key]
         return None
 
     def str_(self, key: str, env: str, legacy_env: str | None = None, default: str | None = None) -> str | None:

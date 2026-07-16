@@ -46,7 +46,7 @@ _RESERVE_SLACK_TOKENS = 2048
 # ~4k tokens of ASCII source, and the reserve is sized against it at worst-case density, so the
 # value is a direct trade: raising it buys the model more per turn and costs usable context.
 # Read's own 2000-line x 500-char ceiling would otherwise allow ~250k tokens from a single call.
-DEFAULT_MAX_TOOL_OUTPUT_CHARS = 16_000
+DEFAULT_MAX_TURN_OUTPUT_CHARS = 16_000
 
 TRUNCATION_NOTICE = (
     "\n<system-reminder>Output truncated: it exceeded the {scope} limit of {limit} characters. "
