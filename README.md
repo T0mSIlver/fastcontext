@@ -314,15 +314,17 @@ traces, each at `--max-turns 16` against `fastcontext-1.0-4b-rl-q8_0` on llama.c
 | --- | --- |
 | Tokens per turn | **~2.0k median**, 786 min, 4.1k max |
 | Peak prompt size | 14.6k – 46.9k (median ~25k) |
-| Turns when the agent stopped on its own | 5, 6, 9, 10, 13, 14 (median ~9) |
+| Turns when the agent answered on its own | 5, 6, 9, 10, 13 (median ~9) |
 | Runs that used all 16 turns | 6 / 12 |
-| Runs that reached the budget | 1 / 12 (a `llama.cpp` KV-cache trace, at turn 13) |
+| Runs the budget stopped early | 1 / 12 (a `llama.cpp` KV-cache trace, finalized at turn 13) |
 | Runs returning a usable answer | 12 / 12 |
 
 At the median burn rate the 45,685-token allowance covers ~23 turns; at the heaviest sustained rate
 observed (3.4k/turn) it covers ~13 — which is where the one budget-limited run finalized, and it still
-answered correctly. **`--max-turns 12`** therefore fits every observed case with headroom, and `16` is
-a reasonable ceiling for hard traces. `4` and `8` truncate over half the runs mid-exploration.
+answered correctly. So **`--max-turns 12`** stays inside the context budget in every case measured,
+and `16` is a reasonable ceiling for hard traces. `4` and `8` cut exploration short on over half the
+runs. Note the cap is not a promise of sufficiency: 6 runs would have kept exploring past 16 had they
+been allowed to, so a higher cap costs latency, not correctness.
 
 Two caveats. Repo size barely predicts cost — a 10.8k-file repo burned 804 tokens/turn while a
 47k-file one converged in 6 turns; question shape dominates. And these numbers scale with *your*
