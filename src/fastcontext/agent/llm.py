@@ -9,21 +9,28 @@ from pydantic import BaseModel, model_serializer
 
 from fastcontext.agent.events import EventSink, StreamClose, StreamDelta, StreamOpen
 
-DEFAULT_MAX_TOKENS = 4096
+# How long ONE response may be. Not the model's window: a completion cap is a bound on what the
+# model writes in a single turn, and FastContext's turns are tool calls and a final answer, both of
+# which are short. Sizing it from the window is what made this dangerous -- see resolve_max_context.
+DEFAULT_MAX_COMPLETION_TOKENS = 4096
 
-# Field names different OpenAI-compatible servers use to advertise a model's
-# context/token limit, in priority order. vLLM exposes ``max_model_len`` at the
-# top level; llama.cpp nests ``n_ctx_train`` under ``meta``; TGI uses
-# ``max_total_tokens``; others vary. We scan for the first one we recognise.
+# Field names different OpenAI-compatible servers use to advertise a model's context window, in
+# priority order.
+#
+# SERVED beats TRAINED. A model trained at 131072 but served with --ctx-size 32768 can only hold
+# 32768: believing the trained figure sets a budget four times the real window, so the budget never
+# trips and the run dies with the overflow it exists to prevent. Under-reading is survivable (the run
+# finalizes early but answers); over-reading is not. So n_ctx (served) is checked before n_ctx_train
+# (a property of the weights), and max_position_embeddings -- also an architectural figure -- is last.
 _CONTEXT_LENGTH_KEYS: tuple[str, ...] = (
-    "max_model_len",  # vLLM
+    "max_model_len",  # vLLM: the served length
     "max_context_length",
     "context_length",
     "context_window",
-    "n_ctx_train",  # llama.cpp (nested under "meta")
-    "n_ctx",  # llama.cpp served context
-    "max_total_tokens",  # TGI
-    "max_position_embeddings",
+    "n_ctx",  # llama.cpp: served context
+    "max_total_tokens",  # TGI: served
+    "n_ctx_train",  # llama.cpp: what the weights were trained for -- may exceed what is served
+    "max_position_embeddings",  # architectural ceiling, not a promise about this server
 )
 
 
@@ -92,13 +99,17 @@ def _scan_for_context_length(obj: Any) -> int | None:
     return None
 
 
-def fetch_provider_max_tokens(
+def fetch_provider_context_length(
     base_url: str,
     api_key: str | None = None,
     model: str | None = None,
     timeout: float = 5.0,
 ) -> int | None:
-    """Best-effort lookup of a model's context length from its provider.
+    """Best-effort lookup of a model's context WINDOW from its provider.
+
+    This is the size of the whole conversation the model can hold, not how long one response may
+    be -- the two were conflated under the name ``max_tokens``, which fed a window into the
+    completion cap and disabled exploration. It feeds ``--max-context``.
 
     Queries the OpenAI-compatible ``GET {base_url}/models`` endpoint and scans the
     response for a known context-length field. Returns the discovered value, or
@@ -140,7 +151,38 @@ def fetch_provider_max_tokens(
     return None
 
 
-def resolve_max_tokens(
+def resolve_max_completion_tokens(explicit: Any = None, *, verbose: bool = False) -> int:
+    """How long one response may be.
+
+    Deliberately does NOT consult the provider. What a provider advertises is its context
+    *window* -- the whole conversation -- and using that as a per-response cap is not merely
+    imprecise, it disables the run: the context reserve is sized as 2 x this value, so a window-sized
+    completion cap makes the reserve exceed the window and the agent finalizes before its first turn,
+    answering with no exploration at all. The window belongs in resolve_max_context().
+    """
+    raw = None if explicit is None else str(explicit).strip()
+    if raw and raw.lower() != "auto":
+        forced = _coerce_positive_int(raw)
+        if forced:
+            return forced
+        print(
+            f"[fastcontext] ignoring invalid max_completion_tokens {raw!r}; "
+            f"using {DEFAULT_MAX_COMPLETION_TOKENS}",
+            file=sys.stderr,
+        )
+    elif raw and raw.lower() == "auto" and verbose:
+        # "auto" used to mean "ask the provider". It now has nothing to ask for: a response cap is
+        # not something a provider advertises.
+        print(
+            f"[fastcontext] max_completion_tokens='auto' is no longer detected from the provider "
+            f"(that value is the context window, see --max-context); using "
+            f"{DEFAULT_MAX_COMPLETION_TOKENS}",
+            file=sys.stderr,
+        )
+    return DEFAULT_MAX_COMPLETION_TOKENS
+
+
+def resolve_max_context(
     explicit: Any = None,
     *,
     base_url: str | None = None,
@@ -148,30 +190,31 @@ def resolve_max_tokens(
     model: str | None = None,
     verbose: bool = False,
 ) -> int:
-    """Resolve the effective max_tokens value.
+    """The usable context window in tokens, which is what the provider can actually tell us.
 
-    Precedence: an explicit integer (CLI ``--max-tokens`` or ``FC_MAX_TOKENS``)
-    wins; the literal ``"auto"`` or a missing value triggers a provider lookup via
-    :func:`fetch_provider_max_tokens`; if that yields nothing we fall back to
-    :data:`DEFAULT_MAX_TOKENS`. Diagnostics are written to stderr so they never
-    contaminate the stdout the main agent parses.
+    An explicit integer wins (``0`` disables the budget outright). ``"auto"`` or a missing value asks
+    the provider, and falls back to ``0`` when it advertises nothing -- the budget stays off rather
+    than guessing, because a wrong window is worse than none: too high and the run dies mid-flight,
+    too low and it finalizes early.
     """
     raw = None if explicit is None else str(explicit).strip()
     if raw and raw.lower() != "auto":
         forced = _coerce_positive_int(raw)
         if forced:
             return forced
-        print(f"[fastcontext] ignoring invalid max_tokens {raw!r}; auto-detecting", file=sys.stderr)
+        if raw == "0":
+            return 0
+        print(f"[fastcontext] ignoring invalid max_context {raw!r}; auto-detecting", file=sys.stderr)
 
-    fetched = fetch_provider_max_tokens(base_url, api_key=api_key, model=model) if base_url else None
+    fetched = fetch_provider_context_length(base_url, api_key=api_key, model=model) if base_url else None
     if fetched:
         if verbose:
-            print(f"[fastcontext] using provider-reported max_tokens={fetched}", file=sys.stderr)
+            print(f"[fastcontext] using provider-reported context window={fetched}", file=sys.stderr)
         return fetched
 
     if verbose:
-        print(f"[fastcontext] provider max_tokens unavailable; falling back to {DEFAULT_MAX_TOKENS}", file=sys.stderr)
-    return DEFAULT_MAX_TOKENS
+        print("[fastcontext] provider context window unavailable; context budget stays off", file=sys.stderr)
+    return 0
 
 
 type Role = Literal[
@@ -217,7 +260,7 @@ class LLM:
         self.model = model
         self.base_url = base_url
         self.client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
-        self.max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_TOKENS)
+        self.max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_COMPLETION_TOKENS)
         self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
         self.debug = kwargs.get("debug", False)

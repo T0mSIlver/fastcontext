@@ -8,10 +8,14 @@ from pathlib import Path
 from fastcontext.agent.agent import AgentRunError
 from fastcontext.agent.agent_factory import make_fastcontext_agent
 from fastcontext.agent.config import warn_renamed_flag
+from fastcontext.agent.llm import DEFAULT_MAX_COMPLETION_TOKENS
 
 # Superseded spellings of --max-turn-output-tokens. Both measured CHARACTERS; the cap is now in
 # tokens, so a value passed under these names is converted, not reused verbatim.
 _DEPRECATED_TURN_FLAGS = ("--max-tool-output-chars", "--max-turn-output-chars")
+
+# Deprecated alias of --max-completion-tokens. Same quantity, so argparse just accepts it.
+_DEPRECATED_COMPLETION_FLAG = "--max-tokens"
 
 
 def _run_init(args) -> int:
@@ -71,14 +75,18 @@ def main():
         ),
     )
     parser.add_argument(
-        "--max-tokens",
+        "--max-completion-tokens",
+        # Deprecated alias. Same quantity, so it is accepted rather than rejected; it is renamed
+        # because "max tokens" named neither which tokens nor whose, and sat one letter from
+        # --max-turns.
+        _DEPRECATED_COMPLETION_FLAG,
+        dest="max_completion_tokens",
         type=str,
         default=None,
-        metavar="N|auto",
+        metavar="N",
         help=(
-            "max completion tokens per response: an integer, or 'auto' to fetch the model's "
-            "context length from the provider. Overrides FC_MAX_TOKENS. "
-            "Default: auto-detect, falling back to 4096."
+            f"how long ONE response may be, in tokens (default {DEFAULT_MAX_COMPLETION_TOKENS}). This "
+            "is not the model's window -- see --max-context. Overrides FC_MAX_COMPLETION_TOKENS."
         ),
     )
     parser.add_argument("--verbose", action="store_true", help="whether to run in verbose mode")
@@ -90,13 +98,15 @@ def main():
     parser.add_argument("--citation", action="store_true", help="Only return the citations in the final answer")
     parser.add_argument(
         "--max-context",
-        type=int,
+        type=str,
         default=None,
+        metavar="N|auto",
         help=(
-            "usable context window in tokens. When the conversation approaches it, the agent stops "
+            "usable context window in tokens: an integer, 0 to disable the budget, or 'auto' (the "
+            "default) to ask the provider. When the conversation approaches it, the agent stops "
             "exploring and produces its final answer instead of growing the prompt until the "
-            "provider rejects it. 0 disables the budget. Overrides FC_MAX_CONTEXT. Note a server's "
-            "usable window can be well below its configured one (llama.cpp --parallel 2 halves it)."
+            "provider rejects it. Overrides FC_MAX_CONTEXT. Note a server's usable window can be "
+            "well below its configured one (llama.cpp --parallel 2 halves it); auto accounts for that."
         ),
     )
     parser.add_argument(
@@ -151,6 +161,8 @@ def main():
     for flag in _DEPRECATED_TURN_FLAGS:
         if any(a == flag or a.startswith(f"{flag}=") for a in sys.argv[1:]):
             warn_renamed_flag(flag, "--max-turn-output-tokens (a TOKEN count -- roughly chars / 3)")
+    if any(a == _DEPRECATED_COMPLETION_FLAG or a.startswith(f"{_DEPRECATED_COMPLETION_FLAG}=") for a in sys.argv[1:]):
+        warn_renamed_flag(_DEPRECATED_COMPLETION_FLAG, "--max-completion-tokens")
 
     args = parser.parse_args()
 
@@ -161,7 +173,7 @@ def main():
     agent = make_fastcontext_agent(
         trajectory_file=args.traj,
         work_dir=work_dir,
-        max_tokens=args.max_tokens,
+        max_completion_tokens=args.max_completion_tokens,
         max_context=args.max_context,
         max_turn_output_tokens=args.max_turn_output_tokens,
         max_result_output_tokens=args.max_result_output_tokens,
