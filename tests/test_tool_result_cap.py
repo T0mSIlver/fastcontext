@@ -74,6 +74,22 @@ def test_per_result_cap_stops_one_call_starving_the_rest(tmp_path):
     assert second.startswith("y" * 1000)
 
 
+def test_the_two_caps_say_which_one_truncated(tmp_path):
+    """The notices must not both claim "per-result".
+
+    The model can act on the difference -- one oversized result means narrow this call, a turn over
+    budget means ask for less at once -- so a turn-capped result labelled "per-result" points it at
+    the wrong fix.
+    """
+    per_result = ToolSet([_BigTool()], work_dir=str(tmp_path), max_tool_result_chars=50)
+    (out,) = _run(per_result, _msg(5000))
+    assert "per-result limit" in out
+
+    per_turn = ToolSet([_BigTool()], work_dir=str(tmp_path), max_tool_output_chars=50)
+    (out,) = _run(per_turn, _msg(5000))
+    assert "per-turn total output limit" in out
+
+
 def test_turn_budget_still_applies_under_a_per_result_cap(tmp_path):
     """The per-result cap does not let a turn exceed the turn budget: N results each under the
     per-result cap still add N x cap, which is what the turn budget exists to stop."""
