@@ -4,32 +4,35 @@ import tempfile
 from pathlib import Path
 
 from fastcontext.agent.tool.glob import GlobTool
-from fastcontext.agent.tool.grep import GrepTool
+from fastcontext.agent.tool.grep import DEFAULT_HEAD_LIMIT, GrepTool
 from fastcontext.agent.tool.read import ReadTool
 
 
 def test_grep_head_limit():
-    """head_limit must be honored for values above the default 100-line cap,
-    and fall back to 100 when unspecified."""
+    """An explicit head_limit is honored, and the default applies when unspecified.
+
+    Asserted against DEFAULT_HEAD_LIMIT rather than a literal: the default is a runaway guard whose
+    value is expected to move, and the model is told it in grep.md.
+    """
     grep = GrepTool()
     with tempfile.TemporaryDirectory() as cwd:
-        # 250 matching lines, single file, so output exceeds any tested limit.
-        (Path(cwd) / "haystack.txt").write_text("\n".join("MATCH" for _ in range(250)), encoding="utf-8")
+        # More matches than the default cap, so both cases truncate.
+        n = DEFAULT_HEAD_LIMIT + 50
+        (Path(cwd) / "haystack.txt").write_text("\n".join("MATCH" for _ in range(n)), encoding="utf-8")
 
         def lines_for(params):
             out = asyncio.run(grep.call(json.dumps(params), cwd=cwd))
             return out.splitlines()
 
-        # Above the default cap: previously clamped to 100, must now be honored.
-        # Truncated output = first `limit` lines + one "Results truncated" note.
+        # Explicit limit is honored. Truncated output = first `limit` lines + one "truncated" note.
         out = lines_for({"pattern": "MATCH", "output_mode": "content", "head_limit": 150})
         assert len(out) == 151, f"expected 150 lines + note, got {len(out)}"
         assert "truncated to first 150" in out[-1]
 
-        # Unspecified: 100-line default cap still applies.
+        # Unspecified: the default cap applies.
         out = lines_for({"pattern": "MATCH", "output_mode": "content"})
-        assert len(out) == 101, f"expected 100 lines + note, got {len(out)}"
-        assert "truncated to first 100" in out[-1]
+        assert len(out) == DEFAULT_HEAD_LIMIT + 1, f"expected {DEFAULT_HEAD_LIMIT} lines + note, got {len(out)}"
+        assert f"truncated to first {DEFAULT_HEAD_LIMIT}" in out[-1]
 
 
 def test_grep_tool():
