@@ -231,6 +231,15 @@ def test_format_citations_without_observed_keeps_everything(tmp_path):
     assert f"{f}:90-95" in out
 
 
+def test_format_citations_validates_relative_path_against_cwd(tmp_path):
+    # A relative citation must be validated against work_dir, not the process cwd. Before the fix
+    # os.path.isfile("alpha.py") was checked from the wrong directory and the citation was dropped.
+    repo = _repo(tmp_path)
+    text = "<final_answer>\nalpha.py:1-3 (relative)\n</final_answer>"
+    out = format_citations(parse_citations(text), cwd=str(repo))
+    assert "alpha.py:1-3 (relative)" in out
+
+
 # --- end-to-end correction loop ----------------------------------------------
 
 
