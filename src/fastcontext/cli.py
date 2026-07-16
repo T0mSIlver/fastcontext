@@ -5,6 +5,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from fastcontext.agent.agent import AgentRunError
 from fastcontext.agent.agent_factory import make_fastcontext_agent
 
 
@@ -128,11 +129,21 @@ def main():
         app.run()
         if app.final_answer is not None:
             print(app.final_answer)
+        elif app.error is not None:
+            # The run failed inside the TUI worker; surface it the same way as the headless path.
+            print(app.error, file=sys.stderr)
+            raise SystemExit(1)
         return
 
-    final_output = asyncio.run(
-        agent.run(prompt=prompt, max_turns=args.max_turns, verbose=args.verbose, citation=args.citation)
-    )
+    try:
+        final_output = asyncio.run(
+            agent.run(prompt=prompt, max_turns=args.max_turns, verbose=args.verbose, citation=args.citation)
+        )
+    except AgentRunError as exc:
+        # A failed run exits nonzero with the error on stderr, so a driving agent can detect failure
+        # from the exit code instead of scanning stdout. stdout stays clean (no partial answer).
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)
     print(final_output)
 
 
