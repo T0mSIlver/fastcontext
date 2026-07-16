@@ -64,7 +64,7 @@ is roughly:
 
 ```
 usable turns ≈ (max_context − reserve) ÷ tokens_per_turn
-    reserve ≈ max_tool_output_chars + 2 × max_tokens + slack
+    reserve ≈ max_turn_output_chars + 2 × max_tokens + slack
 ```
 
 Three things move that number, and raising `--max-turns` alone does nothing if the first one is small:
@@ -74,9 +74,8 @@ Three things move that number, and raising `--max-turns` alone does nothing if t
 - **The reserve**, which is not small: it holds back a full turn of tool output plus the completion so
   the final answer is still sendable. On the reference setup it claims ~26k of a 72k budget, leaving
   ~46k to actually explore with.
-- **Tokens burned per turn**, driven mostly by `--max-tool-output-chars` (the per-turn cap on tool
-  output) and by how much the question makes the model *read* versus *grep*. Repo size matters far
-  less than question shape.
+- **Tokens burned per turn**, driven mostly by `--max-turn-output-chars` (below) and by how much the
+  question makes the model *read* versus *grep*. Repo size matters far less than question shape.
 
 On the reference setup (~46k explorable, ~2k tokens/turn typical, ~3.4k on a heavy trace) that works
 out to ~13 turns before the budget intervenes — hence 12 as a default that fits with room to spare.
@@ -87,6 +86,33 @@ Going over the limit is safe but pointless: the agent finalizes early and still 
 (observed on the heaviest trace in the eval) — **provided `max_context` is set**. It defaults to `0`
 (budget disabled), and with no budget a long run instead grows the prompt until the server rejects it
 and the run dies with no answer at all.
+
+## Tuning how much a run reads
+
+Two caps bound tool output, both in **characters**, `0` disables either. They are already configured;
+override them only for the reason given.
+
+| Flag | Bounds | Default | Reach for it when |
+| --- | --- | --- | --- |
+| `--max-turn-output-chars` | total across **all** tool calls of one turn | `16000` | A run finalizes too early — the turn budget is what the reserve is sized against, so raising it buys the model more per turn and costs usable context (and turns). |
+| `--max-result-output-chars` | a **single** tool result | `0` (off) | A run's answer looks like it only saw one of the files it looked at. |
+
+The second is the non-obvious one. The turn budget is spent **in call order**, so a turn that issues a
+big `Read` plus two `Grep`s can have the `Read` swallow the whole allowance and the greps come back
+empty — the model asked three questions and got one answer. Capping each result first gives every call
+in the turn room:
+
+```bash
+# a wide question that will fan out across several files per turn
+fastcontext -q "<question>" --citation --max-turns 12 --max-result-output-chars 4000
+```
+
+Roughly `max-turn-output-chars ÷ expected calls per turn` is a sane value. Leave it off for narrow
+questions — a single big `Read` is exactly what you want there, and the cap would truncate it for
+nothing.
+
+*(`--max-tool-output-chars` is the old name for `--max-turn-output-chars`. It still works and warns;
+it never capped a single tool's output, which is why it was renamed.)*
 
 ## Notes
 
