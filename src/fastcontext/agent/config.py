@@ -51,6 +51,8 @@ _TUNING_KEYS = (
     ("max_tokens", "FC_MAX_TOKENS", None),
     ("max_context", "FC_MAX_CONTEXT", None),
     ("max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", None),
+    ("max_tool_result_chars", "FC_MAX_TOOL_RESULT_CHARS", None),
+    ("max_citations", "FC_MAX_CITATIONS", None),
     ("context_reserve", "FC_CONTEXT_RESERVE", None),
     ("reasoning_effort", "FC_REASONING_EFFORT", None),
     ("temperature", "FC_TEMPERATURE", None),

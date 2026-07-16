@@ -72,13 +72,14 @@ def test_record_read_of_real_tool_output(tmp_path):
     assert observed[os.path.realpath(str(repo / "alpha.py"))] == {1, 2, 3, 4, 5, 6}
 
 
-def test_record_grep_single_file_has_no_heading(tmp_path):
-    """Blocker regression: rg prints no heading when the search path is one file."""
+def test_record_grep_single_file_attributes_lines_to_that_file(tmp_path):
+    """Grep scoped to a single file: the tool forces a heading (rg omits it by default for one
+    explicit file), and the numbered lines are attributed to that file."""
     repo = _repo(tmp_path)
     target = repo / "alpha.py"
     args = {"pattern": "needle", "path": str(target), "output_mode": "content", "-C": 1}
     output = asyncio.run(GrepTool().call(json.dumps(args), cwd=str(repo)))
-    assert str(target) not in output, "test premise: rg emits no heading for a single-file search"
+    assert str(target) in output, "the tool must name the file it searched"
 
     observed: dict = {}
     record_tool_results(
@@ -88,6 +89,20 @@ def test_record_grep_single_file_has_no_heading(tmp_path):
         cwd=str(repo),
     )
     # match on line 4, context lines 3 and 5
+    assert observed[os.path.realpath(str(target))] == {3, 4, 5}
+
+
+def test_record_grep_without_a_heading_falls_back_to_the_path_argument(tmp_path):
+    """Headless numbered output is still attributed to the Grep call's `path` argument.
+
+    The tool now forces a heading, so its own output always carries one. This guards the fallback
+    that covers output where the heading is absent anyway -- e.g. a per-result cap truncating it
+    away, or an rg build that declines to print it.
+    """
+    repo = _repo(tmp_path)
+    target = repo / "alpha.py"
+    observed: dict = {}
+    record_grep(observed, "3-c\n4:needle\n5-e\n", cwd=str(repo), path=str(target))
     assert observed[os.path.realpath(str(target))] == {3, 4, 5}
 
 

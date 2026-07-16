@@ -21,6 +21,7 @@ _OVERRIDE_KEYS = (
     "max_tokens",
     "max_context",
     "max_tool_output_chars",
+    "max_tool_result_chars",
     "context_reserve",
     "reasoning_effort",
     "max_citations",
@@ -59,6 +60,9 @@ def make_fastcontext_agent(
     max_tool_output_chars = settings.int_(
         "max_tool_output_chars", "FC_MAX_TOOL_OUTPUT_CHARS", DEFAULT_MAX_TOOL_OUTPUT_CHARS
     )
+    # Off by default: the turn budget above is what protects the window, and this only changes how
+    # that budget is shared between the calls of a single turn.
+    max_tool_result_chars = settings.int_("max_tool_result_chars", "FC_MAX_TOOL_RESULT_CHARS", 0)
     max_citations = settings.int_("max_citations", "FC_MAX_CITATIONS", DEFAULT_MAX_CITATIONS)
 
     # max_tokens (the per-response completion cap): the resolved source (override > FC_MAX_TOKENS env
@@ -121,6 +125,7 @@ def make_fastcontext_agent(
         [ReadTool(), GlobTool(), GrepTool()],
         work_dir=work_dir,
         max_tool_output_chars=max_tool_output_chars,
+        max_tool_result_chars=max_tool_result_chars,
     )
     return Agent(
         name=name,
