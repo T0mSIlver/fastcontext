@@ -1,6 +1,6 @@
 [project]
 name = "fastcontext"
-version = "0.1.0"
+version = "0.2.0"
 description = "The FastContext (explore) is a code search agent."
 readme = "README.md"
 requires-python = ">=3.12,<4.0"

@@ -15,9 +15,9 @@ RUN curl -L -o ripgrep.tar.gz https://github.com/BurntSushi/ripgrep/releases/dow
 
 # Install fastcontext
 # copy the wheel file to the container
-COPY fastcontext-0.1.0-py3-none-any.whl /workspace/
+COPY fastcontext-0.2.0-py3-none-any.whl /workspace/
 # uv tool install installs the executable into /root/.local/bin
-RUN uv tool install /workspace/fastcontext-0.1.0-py3-none-any.whl --with requests \
-    && rm /workspace/fastcontext-0.1.0-py3-none-any.whl
+RUN uv tool install /workspace/fastcontext-0.2.0-py3-none-any.whl --with requests \
+    && rm /workspace/fastcontext-0.2.0-py3-none-any.whl
 
 CMD ["/bin/bash"]
