@@ -165,7 +165,7 @@ def run_agent_in_docker(uid: str, experiment: str, sample: dict, local_mount_dir
         mount_items=[(local_mount_dir, traj_dir)],
     )
 
-    instance_container.copy_to_container("../../dist/fastcontext-0.1.0-py3-none-any.whl", agent_workdir)
+    instance_container.copy_to_container("../../dist/fastcontext-0.2.0-py3-none-any.whl", agent_workdir)
     instance_container.copy_to_container("run.sh", agent_workdir)
     instance_container.copy_to_container(query_file, agent_workdir)
     traj_file = os.path.join(traj_dir, experiment, instance_id, "traj.jsonl")

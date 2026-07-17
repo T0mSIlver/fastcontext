@@ -14,7 +14,7 @@ source $HOME/.local/bin/env
 # source .venv/bin/activate
 
 # install fastcontext
-uv tool install fastcontext-0.1.0-py3-none-any.whl --with requests
+uv tool install fastcontext-0.2.0-py3-none-any.whl --with requests
 
 export BASE_URL=
 export MODEL=

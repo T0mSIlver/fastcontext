@@ -20,7 +20,7 @@ Example ``~/.config/fastcontext/config.toml``::
     base_url = "http://127.0.0.1:11434/v1"
     model    = "fastcontext"
     api_key  = "dummy"
-    max_tokens = 4096
+    max_completion_tokens = 4096
     max_context = 70000
     reasoning_effort = "none"
 """

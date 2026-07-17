@@ -47,7 +47,7 @@ DATASET_MAPPING = {
 WRITE_LOCK = threading.Lock()
 
 # Paths
-FASTCONTEXT_WHEEL = REPO_ROOT / "dist" / "fastcontext-0.1.0-py3-none-any.whl"
+FASTCONTEXT_WHEEL = REPO_ROOT / "dist" / "fastcontext-0.2.0-py3-none-any.whl"
 
 
 def resolve_repo_path(path: str | Path) -> Path:
@@ -111,7 +111,7 @@ def setup_fastcontext_in_container(env: DockerEnvironment, fastcontext_env_vars:
 
     # Copy wheel
     subprocess.run(
-        ["docker", "cp", str(FASTCONTEXT_WHEEL), f"{container_id}:{staging}/fastcontext-0.1.0-py3-none-any.whl"],
+        ["docker", "cp", str(FASTCONTEXT_WHEEL), f"{container_id}:{staging}/fastcontext-0.2.0-py3-none-any.whl"],
         check=True, capture_output=True, timeout=60,
     )
 
@@ -122,7 +122,7 @@ apt-get update
 apt-get install -y curl ripgrep
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source "$HOME/.local/bin/env"
-uv tool install {staging}/fastcontext-0.1.0-py3-none-any.whl --with requests
+uv tool install {staging}/fastcontext-0.2.0-py3-none-any.whl --with requests
 ln -sf "$HOME/.local/bin/fastcontext" /usr/local/bin/fastcontext || true
 fastcontext --help >/dev/null
 """.strip()
