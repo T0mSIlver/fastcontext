@@ -8,6 +8,7 @@ from jinja2 import Environment as JinjaEnvironment
 from jinja2 import StrictUndefined
 
 from fastcontext.agent.observed import citation_observed
+from fastcontext.agent.tool.utils import resolve_path
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -104,15 +105,20 @@ def format_citations(
     if validate:
         validated_citations = []
         for c in citations:
-            # if not file or not existing, skip this citation. Resolve a relative path against the
-            # working directory (as the observed-lines side does) rather than the process cwd, or a
-            # relative citation would be checked against the wrong directory and silently dropped.
+            # if not file or not existing, skip this citation. Resolve the path the same way the
+            # tools do (mangled absolute prefixes, relative paths) against the working directory —
+            # not the process cwd — or a citation the model expressed in its usual mangled form
+            # would be checked against the wrong file and silently dropped.
             path = c["path"]
+            if cwd:
+                path = resolve_path(path, cwd)
             if cwd and not os.path.isabs(path):
                 path = os.path.join(cwd, path)
             if not os.path.isfile(path):
                 continue
-            validated_citations.append(c)
+            # Emit the resolved path: the whole point of a citation is that the caller can open it
+            # directly, which the model's mangled form does not allow.
+            validated_citations.append({**c, "path": path})
 
         citations = validated_citations
 
