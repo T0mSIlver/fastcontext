@@ -419,8 +419,9 @@ means so a broken run is never averaged in as a zero. See [`eval/README.md`](eva
 FastContext began as Microsoft research on training efficient repository-exploration models (4B–30B)
 with supervised fine-tuning and task-grounded RL — delegating broad exploration out of the main
 coding agent's trajectory to improve the score-per-token tradeoff. The original repository has since
-been removed from GitHub; this project continues the harness as a standalone tool, keeping the
-exploration contract and hardening it for day-to-day use. If you use it in research, cite the paper:
+been removed from GitHub, and the paper itself was withdrawn from arXiv ("product IP issues", per
+its withdrawal notice); this project continues the harness as a standalone tool, keeping the
+exploration contract and hardening it for day-to-day use. The reference is kept for provenance:
 
 ```bibtex
 @misc{zhang2026fastcontexttrainingefficientrepository,
