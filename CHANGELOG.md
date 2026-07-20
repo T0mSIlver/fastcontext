@@ -6,6 +6,11 @@ Notable changes to FastContext. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Citations written in the model's usual mangled path forms (`/src/foo.py`, `/myrepo/src/foo.py`)
+  are now resolved like tool-call paths instead of being dropped wholesale — previously such a run
+  returned an **empty** `<final_answer>` block. The answer also emits the resolved real path (#36).
+
 ### Changed
 - The repository is now standalone — detached from the fork network, with docs, license, and
   packaging metadata describing the project in its own right.
