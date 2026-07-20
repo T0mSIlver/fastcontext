@@ -34,8 +34,8 @@ _CONTEXT_LENGTH_KEYS: tuple[str, ...] = (
 )
 
 
-class RequestyAPIError(Exception):
-    """Exception for Requesty LLM API errors."""
+class LLMAPIError(Exception):
+    """Exception for LLM API call failures."""
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -263,7 +263,6 @@ class LLM:
         self.max_tokens = kwargs.get("max_tokens", DEFAULT_MAX_COMPLETION_TOKENS)
         self.temperature = kwargs.get("temperature", 0.7)
         self.top_p = kwargs.get("top_p", 0.95)
-        self.debug = kwargs.get("debug", False)
         self.reasoning_effort = kwargs.get("reasoning_effort")
 
     async def acall(
@@ -280,7 +279,6 @@ class LLM:
         payload = {
             "model": self.model,
             "messages": messages,
-            # "max_tokens": self.max_tokens,
             "max_completion_tokens": self.max_tokens,
             "temperature": self.temperature,
             "top_p": self.top_p,
@@ -302,26 +300,15 @@ class LLM:
             if tool_choice:
                 payload["tool_choice"] = tool_choice
 
-        if self.debug:
-            print("LLM Payload:", payload)
-
-        # Token-by-token streaming is only used when a live consumer (the TUI)
-        # asks for it and the model goes through the OpenAI-compatible endpoint.
-        # The claude path uses a separate, non-streaming client.
-        if event_sink is not None and "claude" not in self.model:
+        # Token-by-token streaming is only used when a live consumer (the TUI) asks for it.
+        if event_sink is not None:
             try:
                 return await self._acall_stream(payload, event_sink, turn)
             except Exception as e:
-                raise RequestyAPIError(f"LLM API call failed: {str(e)}") from e
+                raise LLMAPIError(f"LLM API call failed: {str(e)}") from e
 
         try:
-            if "claude" in self.model:
-                # Use the custom API call for claude models
-                from fastcontext.agent.llm_api import call_completion
-
-                response = call_completion(model=self.model, messages=messages, tools=tools)
-            else:
-                response = await self.client.chat.completions.create(**payload)
+            response = await self.client.chat.completions.create(**payload)
             usage = response.usage.to_dict()
             content = None
             reasoning_content = None
@@ -365,7 +352,7 @@ class LLM:
                 role=role, content=content, reasoning_content=reasoning_content, model=self.model, usage=usage
             )
         except Exception as e:
-            raise RequestyAPIError(f"LLM API call failed: {str(e)}") from e
+            raise LLMAPIError(f"LLM API call failed: {str(e)}") from e
 
     @staticmethod
     def _delta_reasoning(delta: Any) -> str | None:
