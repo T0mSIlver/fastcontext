@@ -22,3 +22,8 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "fc_eval"
 module-root = ""
+
+[tool.pytest.ini_options]
+# Stops pytest's rootdir walk at this file. Without it, pytest picks up the repo root's
+# `asyncio_mode` option and warns on every run, since pytest-asyncio is not a dep here.
+testpaths = ["tests"]

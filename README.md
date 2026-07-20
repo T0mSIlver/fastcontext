@@ -13,17 +13,19 @@ main agent ──"where is request validation done?"──▶  fastcontext -q ..
           ◀──────────  <final_answer> src/router.py:42-58 … </final_answer>  ──────────┘
 ```
 
-This is a fork focused on making that harness robust and pleasant to operate: a live **TUI** to watch
-a run, **context-budget** management so long explorations answer instead of dying, **provider
+The harness is built to be robust and pleasant to operate: a live **TUI** to watch a run,
+**context-budget** management so long explorations answer instead of dying, **provider
 auto-detection** of token limits, **citation validation** that drops hallucinated line ranges, and a
-small **eval harness**. See [Fork features](#fork-features) for the full list.
+small **eval harness**. See [Features](#features) for the full list.
+
+<p align="center"><img src="docs/tui.svg" alt="FastContext TUI streaming a live exploration run" width="820"></p>
 
 ---
 
 ## Table of contents
 
 - [What it does](#what-it-does)
-- [Fork features](#fork-features)
+- [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Quick start — watch a run in the TUI](#quick-start--watch-a-run-in-the-tui)
@@ -60,9 +62,9 @@ src/fastcontext/agent/tool/grep.py:9-120
 The contract is deliberately narrow: **FastContext finds the relevant code; your main agent decides
 what to do with it.** It never edits files.
 
-## Fork features
+## Features
 
-Everything below is in this fork on top of the original explorer:
+On top of the core explore loop:
 
 - 🖥️ **Live TUI run inspector** (`--tui`) — stream a run as collapsible rows (reasoning, each tool
   call, each result, the final answer) with a docked token-usage bar. Far more legible than dumping
@@ -233,8 +235,9 @@ fastcontext -q "Locate the request-validation logic and the tests that cover it"
 - **`--citation`** makes stdout *only* the `<final_answer>` block — clean to parse, nothing else.
 - **stdout** carries the answer; **stderr** carries diagnostics (token auto-detection notes, budget
   warnings). A parsing agent should read stdout and ignore stderr.
-- Exit code is `0` for a normal run. On an LLM failure the agent still exits `0` and writes
-  `LLM API call failed…` — check stdout for that marker rather than relying on the exit code.
+- Exit code is `0` for a normal run and `1` for a failed one (LLM/API failure, or no final answer
+  within the turn cap), with the reason on **stderr** and stdout left clean — a driving agent can
+  trust the exit code.
 - Each run records a JSONL trajectory under `.fastcontext/` (override with `--traj`).
 
 A typical delegation loop the main agent runs:
@@ -413,10 +416,12 @@ means so a broken run is never averaged in as a zero. See [`eval/README.md`](eva
 
 ## Background
 
-FastContext originates from research on training efficient repository-exploration models (4B–30B) with
-supervised fine-tuning and task-grounded RL, delegating broad exploration out of the main coding
-agent's trajectory to improve the score-per-token tradeoff. This fork keeps that exploration contract
-and hardens the surrounding harness for day-to-day use.
+FastContext began as Microsoft research on training efficient repository-exploration models (4B–30B)
+with supervised fine-tuning and task-grounded RL — delegating broad exploration out of the main
+coding agent's trajectory to improve the score-per-token tradeoff. The original repository has since
+been removed from GitHub, and the paper itself was withdrawn from arXiv ("product IP issues", per
+its withdrawal notice); this project continues the harness as a standalone tool, keeping the
+exploration contract and hardening it for day-to-day use. The reference is kept for provenance:
 
 ```bibtex
 @misc{zhang2026fastcontexttrainingefficientrepository,
