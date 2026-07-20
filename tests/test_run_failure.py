@@ -12,7 +12,7 @@ import asyncio
 import pytest
 
 from fastcontext.agent.agent import Agent, AgentRunError
-from fastcontext.agent.llm import FunctionCall, Message, RequestyAPIError
+from fastcontext.agent.llm import FunctionCall, Message, LLMAPIError
 from fastcontext.agent.tool import ToolSet
 from fastcontext.agent.tool.read import ReadTool
 
@@ -23,7 +23,7 @@ class _FailingLLM:
     model = "fake"
 
     async def acall(self, messages, tools=None, **kwargs):
-        raise RequestyAPIError("connection refused")
+        raise LLMAPIError("connection refused")
 
 
 class _NeverAnswersLLM:

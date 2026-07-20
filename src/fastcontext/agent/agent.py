@@ -10,7 +10,7 @@ from fastcontext.agent.events import (
     TurnStarted,
     UsageUpdated,
 )
-from fastcontext.agent.llm import LLM, Message, RequestyAPIError
+from fastcontext.agent.llm import LLM, Message, LLMAPIError
 from fastcontext.agent.observed import (
     ObservedLines,
     correction_message,
@@ -146,7 +146,7 @@ class Agent:
                     turn=n_turn,
                     tool_choice=tool_choice,
                 )
-            except RequestyAPIError as e:
+            except LLMAPIError as e:
                 # Record the failure to the trajectory, then raise so the caller sees a failed run
                 # instead of a normal return of the error text (which exited 0 and forced callers to
                 # grep stdout for "LLM API call failed").
