@@ -3,9 +3,9 @@
 A small [uv](https://docs.astral.sh/uv/) project that launches FastContext runs,
 saves their trajectories, scores them, and renders a simple HTML dashboard.
 
-It is built to **compare branches of FastContext** (e.g. `fastcontext-expl-eval-1`
-vs `fastcontext-expl-eval-2`) on the same set of repo + query tasks, so you can
-see how a change to the explorer moves the metrics.
+It is built to **compare branches of FastContext** (e.g. `main` vs a feature
+branch) on the same set of repo + query tasks, so you can see how a change
+moves the metrics.
 
 ## What it measures
 
@@ -55,8 +55,8 @@ resolved against the current directory.
 
 ## Failed runs
 
-A run whose LLM endpoint fails (the agent prints `LLM API call failed`), times
-out, or crashes is retried (`retries` / `retry_backoff` in `config.yaml`, default
+A run whose LLM endpoint fails (the agent exits nonzero / prints
+`LLM API call failed`), times out, or crashes is retried (`retries` / `retry_backoff` in `config.yaml`, default
 2 attempts extra with 5s backoff; `--retries` overrides). A run that still fails
 is marked **errored**: it is reported separately (`errors: N/M` per branch in the
 summary and dashboard) and **excluded from the branch means**, so a broken run is
@@ -64,7 +64,7 @@ never averaged in as a legitimate zero. One failing run never aborts the sweep.
 
 Each branch is checked out as a git worktree of `fastcontext_repo` and run from
 inside the target repo via `uv run --project <worktree> fastcontext`, so the
-query is scored against that branch's explorer code with the repo as `work_dir`.
+query is scored against that branch's code with the repo as `work_dir`.
 
 Results layout:
 
@@ -77,9 +77,8 @@ results/
 
 ## Try it without an endpoint
 
-`config.yaml` lists a couple of pre-recorded `reference_runs` (the example
-trajectories under `../<repo>/.fastcontext/`). They are scored and shown in the
-dashboard without launching anything:
+`config.yaml` shows how to list pre-recorded trajectories as `reference_runs`.
+They are scored and shown in the dashboard without launching anything:
 
 ```bash
 uv run fc-eval dashboard --open
