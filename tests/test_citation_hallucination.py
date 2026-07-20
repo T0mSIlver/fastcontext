@@ -380,3 +380,44 @@ def test_citation_pointing_at_missing_file_is_still_dropped(tmp_path):
 def test_citation_disabled_returns_raw_content(tmp_path):
     agent, repo = _agent(tmp_path, [Message(role="assistant", content="plain answer")])
     assert asyncio.run(agent.run("q")) == "plain answer"
+
+
+# --- mangled citation paths --------------------------------------------------
+#
+# The model routinely writes citations with a leading slash on a workspace-relative path
+# ("/alpha.py") or with the repo name as the filesystem root ("/repo/alpha.py") — the same forms
+# the tools already resolve on the way in. The observed-lines lookup must resolve them the same
+# way, or every citation of a run is dropped and the final answer comes back empty.
+
+
+def test_citation_observed_resolves_leading_slash_relative_path(tmp_path):
+    repo = _repo(tmp_path)
+    observed = {}
+    record_read(observed, f"```{repo / 'alpha.py'}:1-6\n1|import os", cwd=str(repo))
+    assert citation_observed(observed, _cite("/alpha.py", 2, 4), cwd=str(repo))
+
+
+def test_citation_observed_resolves_repo_name_used_as_root(tmp_path):
+    repo = _repo(tmp_path)
+    observed = {}
+    record_read(observed, f"```{repo / 'alpha.py'}:1-6\n1|import os", cwd=str(repo))
+    assert citation_observed(observed, _cite("/repo/alpha.py", 2, 4), cwd=str(repo))
+
+
+def test_unrelated_absolute_citation_stays_unverified(tmp_path):
+    repo = _repo(tmp_path)
+    observed = {}
+    record_read(observed, f"```{repo / 'alpha.py'}:1-6\n1|import os", cwd=str(repo))
+    assert unverified_citations(observed, [_cite("/somewhere/else.py", 1, 3)], cwd=str(repo))
+
+
+def test_final_answer_rewrites_mangled_citation_to_real_path(tmp_path):
+    repo = _repo(tmp_path)
+    observed = {}
+    record_read(observed, f"```{repo / 'alpha.py'}:1-6\n1|import os", cwd=str(repo))
+    text = "<final_answer>\n/repo/alpha.py:2-4 (target)\n</final_answer>"
+    answer = get_final_answer(text, observed=observed, cwd=str(repo))
+    assert f"{(repo / 'alpha.py').resolve()}:2-4 (target)" in answer
+    # The mangled form must not survive as a citation of its own (the resolved absolute path
+    # legitimately ends with .../repo/alpha.py, so match from the line start).
+    assert "\n/repo/alpha.py:2-4" not in answer

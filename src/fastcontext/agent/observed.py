@@ -14,6 +14,8 @@ import json
 import os
 import re
 
+from fastcontext.agent.tool.utils import resolve_path
+
 # Read output header: ```/abs/path/to/file.py:12-40
 _READ_HEADER_RE = re.compile(r"```(.+):(\d+)-(\d+)")
 # Grep content line: "12:match" or "12-context"; the digits are the line number.
@@ -24,6 +26,17 @@ type ObservedLines = dict[str, set[int]]
 
 
 def _normalize(path: str, cwd: str | None) -> str:
+    """Map a path onto the key the observed-lines map uses (a realpath).
+
+    Goes through ``resolve_path`` so the model's mangled citation forms — a leading slash on a
+    workspace-relative path (``/src/foo.py``) or the repo name used as the filesystem root
+    (``/myrepo/src/foo.py``) — key the same as the real file the tools actually recorded. The
+    tools already resolve these forms on the way in (they are how the model refers to workspace
+    files); without the same treatment here, every such citation looked unobserved and was
+    dropped, silently emptying the final answer.
+    """
+    if cwd:
+        path = resolve_path(path, cwd)
     if cwd and not os.path.isabs(path):
         path = os.path.join(cwd, path)
     return os.path.realpath(path)
